@@ -115,15 +115,6 @@ def play(args):
         env_cfg.asset.box.random_props = False
         env_cfg.asset.box.reset_mode = "default"
         env_cfg.env.episode_length_s = 10
-    # sitdown
-    if args.task == "sitdown" or args.task == "liedown":
-        env_cfg.asset.chair.random_size = False
-        env_cfg.asset.chair.reset_mode = "default"
-    # styleloco
-    if args.task == "styleloco_dinosaur" or args.task == "styleloco_highknee":
-        env_cfg.terrain.mesh_type = "plane"
-        env_cfg.terrain.num_rows = 3
-        env_cfg.terrain.num_cols = 3
 
     if args.play_dataset:
         env_cfg.viewer.pos = [-5, -5, 4]
