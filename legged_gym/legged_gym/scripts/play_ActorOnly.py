@@ -111,7 +111,7 @@ def play(args):
     args.resume = False
 
     # carrybox
-    if args.task == "carrybox":
+    if args.task in ("carrybox", "carrybox_perturb"):
         env_cfg.asset.box.random_props = False
         env_cfg.asset.box.reset_mode = "default"
         env_cfg.env.episode_length_s = 10

@@ -30,7 +30,7 @@ def play(args):
     train_cfg.runner.resume = True
 
     # carrybox
-    if args.task == 'carrybox':
+    if args.task in ('carrybox', 'carrybox_perturb'):
         env_cfg.asset.box.random_props = False
         env_cfg.asset.box.reset_mode = 'default'
         env_cfg.env.episode_length_s = 10

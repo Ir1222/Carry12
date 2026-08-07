@@ -40,6 +40,10 @@ from .g1.carrybox_config import G1CfgPPO as G1CarryBoxCfgPPO
 from .g1.carrybox_resume_config import G1Cfg as G1CarryBoxResumeCfg
 from .g1.carrybox_resume_config import G1CfgPPO as G1CarryBoxResumeCfgPPO
 
+from .g1.carrybox_boxperturb import LeggedRobot as G1CarryBoxPerturb
+from .g1.carrybox_boxperturb_resume_config import G1Cfg as G1CarryBoxPerturbCfg
+from .g1.carrybox_boxperturb_resume_config import G1CfgPPO as G1CarryBoxPerturbCfgPPO
+
 from .g1.sitdown import LeggedRobot as G1SitDown
 from .g1.sitdown_config import G1Cfg as G1SitDownCfg
 from .g1.sitdown_config import G1CfgPPO as G1SitDownCfgPPO
@@ -60,6 +64,7 @@ from .g1.styleloco_highknee_config import G1CfgPPO as G1StyleLocoHighKneeCfgPPO
 
 task_registry.register( "carrybox", G1CarryBox, G1CarryBoxCfg(), G1CarryBoxCfgPPO() )
 task_registry.register( "carrybox_resume", G1CarryBox, G1CarryBoxResumeCfg(), G1CarryBoxResumeCfgPPO() )
+task_registry.register( "carrybox_perturb", G1CarryBoxPerturb, G1CarryBoxPerturbCfg(), G1CarryBoxPerturbCfgPPO() )
 task_registry.register( "sitdown", G1SitDown, G1SitDownCfg(), G1SitDownCfgPPO() )
 task_registry.register( "liedown", G1LieDown, G1LieDownCfg(), G1LieDownCfgPPO() )
 task_registry.register( "standup", G1Standup, G1StandupCfg(), G1StandupCfgPPO() )

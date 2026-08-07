@@ -27,9 +27,6 @@ class G1Cfg(CarryBoxResumeCfg):
         stable_confirmed_carry_policy_steps = 20
         max_events_per_episode = 1
         pulse_duration_s = 0.10
-        pulse_profile = "half_sine"
-        jittered_half_sine_amplitude = 0.15
-        force_peak_cap_N = 10.0
         force_sign_verification_samples = 12
         force_closure_residual_max = 0.20
 
