@@ -6,7 +6,7 @@ import torch
 from isaacgym import gymapi, gymtorch
 from isaacgym.torch_utils import quat_from_angle_axis, quat_rotate, quat_rotate_inverse
 
-from .carrybox import LeggedRobot as CarryBox
+from .carrybox_PI import LeggedRobot as CarryBox
 from .hand_box_force import (
     decompose_force,
     estimate_box_face_normal_local,

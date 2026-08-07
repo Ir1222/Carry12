@@ -1,23 +1,25 @@
-from .carrybox_resume_config import G1Cfg as CarryBoxResumeCfg
-from .carrybox_resume_config import G1CfgPPO as CarryBoxResumeCfgPPO
+from .carrybox_config_PI import G1Cfg as CarryBoxPICfg
+from .carrybox_config_PI import G1CfgPPO as CarryBoxPICfgPPO
 
 
-class G1Cfg(CarryBoxResumeCfg):
-    """Resume-compatible box-COM perturbation curriculum configuration."""
+class G1Cfg(CarryBoxPICfg):
+    """PI carry-phase compatible box-COM perturbation evaluation configuration."""
 
-    class env(CarryBoxResumeCfg.env):
-        # Explicit compatibility contract for existing carry-box checkpoints.
+    class env(CarryBoxPICfg.env):
+        # Actor-only play requires actor compatibility; PI remains env-side state.
         num_actor_obs = 738
         num_privileged_obs = 143
         num_interaction_priv_obs = 17
+        num_base_lin_vel_priv = 3
+        num_current_frame_critic_obs = 126
 
-    class asset(CarryBoxResumeCfg.asset):
-        class box(CarryBoxResumeCfg.asset.box):
+    class asset(CarryBoxPICfg.asset):
+        class box(CarryBoxPICfg.asset.box):
             random_size = False
             random_density = False
             density_default = 50.0
 
-    class domain_rand(CarryBoxResumeCfg.domain_rand):
+    class domain_rand(CarryBoxPICfg.domain_rand):
         # Keep all inherited robot DR; disable only the legacy torso force.
         disturbance = False
 
@@ -114,8 +116,8 @@ class G1Cfg(CarryBoxResumeCfg):
         evaluation_goal_bearing_offset_deg = (15.0, 75.0)
 
 
-class G1CfgPPO(CarryBoxResumeCfgPPO):
-    class runner(CarryBoxResumeCfgPPO.runner):
-        run_name = "carrybox_boxperturb_resume"
+class G1CfgPPO(CarryBoxPICfgPPO):
+    class runner(CarryBoxPICfgPPO.runner):
+        run_name = "carrybox_perturb_pi_actor_only"
 
     amp = G1Cfg.amp
