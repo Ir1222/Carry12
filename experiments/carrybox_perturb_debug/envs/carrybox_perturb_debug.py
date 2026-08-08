@@ -1,5 +1,13 @@
+import math
+
 import numpy as np
 import torch
+from isaacgym.torch_utils import (
+    quat_from_angle_axis,
+    quat_mul,
+    quat_rotate,
+    quat_rotate_inverse,
+)
 
 from legged_gym.envs.g1.carrybox_boxperturb import (
     LeggedRobot as CarryBoxPerturb,
@@ -16,6 +24,234 @@ class LeggedRobot(CarryBoxPerturb):
         )
         self._debug_force_viewer_check_reported = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._fixed_scene_previous_snapshot = None
+        self._fixed_scene_reset_count = 0
+
+    def _reset_actors(self, env_ids):
+        super()._reset_actors(env_ids)
+        if self._fixed_scene_enabled():
+            self._apply_fixed_robot_state(env_ids)
+
+    def _reset_boxes(self, env_ids):
+        super()._reset_boxes(env_ids)
+        if self._fixed_scene_enabled():
+            self._apply_fixed_box_state(env_ids)
+
+    def _reset_task(self, env_ids):
+        super()._reset_task(env_ids)
+        if self._fixed_scene_enabled():
+            self._apply_fixed_goal_state(env_ids)
+            self._update_fixed_scene_derived_state(env_ids)
+
+    def _reset_env_tensors(self, env_ids):
+        super()._reset_env_tensors(env_ids)
+        if self._fixed_scene_enabled():
+            self._debug_log_fixed_scene(env_ids)
+
+    def _fixed_scene_enabled(self):
+        return bool(getattr(self._fixed_scene_cfg(), "enabled", False))
+
+    def _fixed_scene_cfg(self):
+        return getattr(self.cfg, "fixed_scene", None)
+
+    def _apply_fixed_robot_state(self, env_ids):
+        cfg = self._fixed_scene_cfg()
+        root_pos_local = self._fixed_tensor(cfg.robot_position)
+        root_quat = self._normalized_quat(cfg.robot_orientation)
+
+        self.root_states[env_ids, 0:3] = root_pos_local + self.env_origins[env_ids]
+        self.root_states[env_ids, 3:7] = root_quat.expand(len(env_ids), -1)
+        self.root_states[env_ids, 7:13] = 0.0
+        self.dof_pos[env_ids] = self.default_dof_pos.expand(len(env_ids), -1)
+        self.dof_vel[env_ids] = 0.0
+
+    def _apply_fixed_box_state(self, env_ids):
+        cfg = self._fixed_scene_cfg()
+        robot_quat = self.root_states[env_ids, 3:7]
+        offset_local = self._fixed_tensor(cfg.box_offset_robot_local).expand(
+            len(env_ids), -1
+        )
+        offset_world = quat_rotate(robot_quat, offset_local)
+        clearance = float(getattr(cfg, "box_clearance_m", 0.01))
+
+        box_pos = self.root_states[env_ids, 0:3] + offset_world
+        box_pos[:, 2] = (
+            self.env_origins[env_ids, 2] + 0.5 * self._box_size[env_ids, 2] + clearance
+        )
+        box_quat = self._yaw_relative_to_robot(robot_quat, cfg.box_yaw_deg)
+
+        self.box_states[env_ids, 0:3] = box_pos
+        self.box_states[env_ids, 3:7] = box_quat
+        self.box_states[env_ids, 7:13] = 0.0
+
+        self.platform_pos[env_ids, 0:2] = box_pos[:, 0:2]
+        self.platform_pos[env_ids, 2] = (
+            box_pos[:, 2] - 0.5 * self._box_size[env_ids, 2] - self._platform_height
+        )
+        self.platform_states[env_ids, 3:7] = self.default_quat.expand(len(env_ids), -1)
+        self.platform_states[env_ids, 7:13] = 0.0
+
+    def _apply_fixed_goal_state(self, env_ids):
+        cfg = self._fixed_scene_cfg()
+        robot_quat = self.root_states[env_ids, 3:7]
+        bearing = math.radians(float(cfg.goal_bearing_deg))
+        direction_local = torch.tensor(
+            [math.cos(bearing), math.sin(bearing), 0.0],
+            dtype=torch.float,
+            device=self.device,
+        ).expand(len(env_ids), -1)
+        direction_world = quat_rotate(robot_quat, direction_local)
+        direction_xy = direction_world[:, 0:2]
+        direction_xy = direction_xy / torch.clamp(
+            torch.linalg.vector_norm(direction_xy, dim=-1, keepdim=True),
+            min=1.0e-9,
+        )
+
+        distance = float(cfg.goal_distance_m)
+        goal_xy = self.box_states[env_ids, 0:2] + distance * direction_xy
+        self.goal_pos[env_ids, 0:2] = goal_xy
+        self.goal_pos[env_ids, 2] = (
+            self.env_origins[env_ids, 2] + float(self.cfg.rewards.target_box_height)
+        )
+        self.goal_rot[env_ids] = self._yaw_relative_to_robot(
+            robot_quat, cfg.goal_yaw_deg
+        )
+
+        self.tar_platform_pos[env_ids, 0:2] = goal_xy
+        self.tar_platform_pos[env_ids, 2] = (
+            self.goal_pos[env_ids, 2]
+            - 0.5 * self._box_size[env_ids, 2]
+            - 0.5 * self._platform_height
+        )
+        self.tar_platform_states[env_ids, 3:7] = self.default_quat.expand(
+            len(env_ids), -1
+        )
+        self.tar_platform_states[env_ids, 7:13] = 0.0
+
+    def _update_fixed_scene_derived_state(self, env_ids):
+        self.robot2object_dir[env_ids] = (
+            self.box_states[env_ids, :2] - self.root_states[env_ids, :2]
+        )
+        self.robot2object_dist[env_ids] = torch.norm(
+            self.robot2object_dir[env_ids], dim=-1
+        )
+        self.robot2goal_dir[env_ids] = (
+            self.goal_pos[env_ids, :2] - self.root_states[env_ids, :2]
+        )
+        self.robot2goal_dist[env_ids] = torch.norm(
+            self.robot2goal_dir[env_ids], dim=-1
+        )
+        self.object2start_pos[env_ids] = (
+            self.box_states[env_ids, :3] - self.platform_pos[env_ids, :3]
+        )
+        self.object2start_dist_xy[env_ids] = torch.norm(
+            self.object2start_pos[env_ids, :2], dim=-1
+        )
+        self.object2start_dist_xyz[env_ids] = torch.norm(
+            self.object2start_pos[env_ids], dim=-1
+        )
+        self.object2goal_pos[env_ids] = (
+            self.box_states[env_ids, :3] - self.goal_pos[env_ids]
+        )
+        self.object2goal_dist_xy[env_ids] = torch.norm(
+            self.object2goal_pos[env_ids, :2], dim=-1
+        )
+        self.object2goal_dist_xyz[env_ids] = torch.norm(
+            self.object2goal_pos[env_ids], dim=-1
+        )
+        self.projected_gravity_box[env_ids] = quat_rotate_inverse(
+            self.box_states[env_ids, 3:7], self.gravity_vec[env_ids]
+        )
+        self.tag_pos[env_ids] = (
+            quat_rotate(
+                self.box_states[env_ids, 3:7].unsqueeze(1).expand(-1, 4, -1),
+                self.tag_pos_local[env_ids],
+            )
+            + self.box_states[env_ids, :3].unsqueeze(1)
+        )
+
+    def _yaw_relative_to_robot(self, robot_quat, yaw_deg):
+        yaw = torch.full(
+            (robot_quat.shape[0],),
+            math.radians(float(yaw_deg)),
+            dtype=torch.float,
+            device=self.device,
+        )
+        yaw_quat = quat_from_angle_axis(yaw, self.z_axis_unit.expand(len(yaw), -1))
+        return quat_mul(robot_quat, yaw_quat)
+
+    def _fixed_tensor(self, values):
+        return torch.tensor(values, dtype=torch.float, device=self.device)
+
+    def _normalized_quat(self, values):
+        quat = self._fixed_tensor(values)
+        return quat / torch.clamp(torch.linalg.vector_norm(quat), min=1.0e-9)
+
+    def _debug_log_fixed_scene(self, env_ids):
+        if not self._debug_includes_env0(env_ids):
+            return
+
+        env_id = 0
+        self._fixed_scene_reset_count += 1
+        snapshot = {
+            "robot": torch.cat(
+                (
+                    self.root_states[env_id],
+                    self.dof_pos[env_id],
+                    self.dof_vel[env_id],
+                )
+            ).detach().clone(),
+            "box": self.box_states[env_id].detach().clone(),
+            "goal": torch.cat(
+                (
+                    self.goal_pos[env_id],
+                    self.goal_rot[env_id],
+                    self.tar_platform_pos[env_id],
+                )
+            ).detach().clone(),
+        }
+        previous = self._fixed_scene_previous_snapshot
+        identical = {}
+        max_delta = {}
+        for name, value in snapshot.items():
+            if previous is None:
+                identical[name] = "n/a"
+                max_delta[name] = float("nan")
+                continue
+            delta = torch.max(torch.abs(value - previous[name]))
+            identical[name] = bool(
+                torch.allclose(value, previous[name], atol=1.0e-6, rtol=0.0)
+            )
+            max_delta[name] = float(delta.item())
+        self._fixed_scene_previous_snapshot = snapshot
+
+        box_goal_distance_xy = float(self.object2goal_dist_xy[env_id].item())
+        print(
+            "[FixedScene]\n"
+            f"reset_count={self._fixed_scene_reset_count}\n"
+            f"step={self.common_step_counter}\n"
+            "env=0\n"
+            f"robot_pos={self._debug_list(self.root_states[env_id, 0:3])}\n"
+            f"robot_rot={self._debug_list(self.root_states[env_id, 3:7])}\n"
+            f"robot_lin_vel={self._debug_list(self.root_states[env_id, 7:10])}\n"
+            f"robot_ang_vel={self._debug_list(self.root_states[env_id, 10:13])}\n"
+            f"dof_pos={self._debug_list(self.dof_pos[env_id])}\n"
+            f"dof_vel={self._debug_list(self.dof_vel[env_id])}\n"
+            f"box_pos={self._debug_list(self.box_states[env_id, 0:3])}\n"
+            f"box_rot={self._debug_list(self.box_states[env_id, 3:7])}\n"
+            f"box_lin_vel={self._debug_list(self.box_states[env_id, 7:10])}\n"
+            f"box_ang_vel={self._debug_list(self.box_states[env_id, 10:13])}\n"
+            f"goal_pos={self._debug_list(self.goal_pos[env_id])}\n"
+            f"goal_rot={self._debug_list(self.goal_rot[env_id])}\n"
+            f"target_platform_pos={self._debug_list(self.tar_platform_pos[env_id])}\n"
+            f"box_goal_distance_xy={box_goal_distance_xy:.6f}\n"
+            f"robot_state_identical_to_previous={identical['robot']}\n"
+            f"box_state_identical_to_previous={identical['box']}\n"
+            f"goal_state_identical_to_previous={identical['goal']}\n"
+            f"robot_state_max_abs_delta={max_delta['robot']:.9f}\n"
+            f"box_state_max_abs_delta={max_delta['box']:.9f}\n"
+            f"goal_state_max_abs_delta={max_delta['goal']:.9f}"
         )
 
     def _update_box_perturbation_state(self):
