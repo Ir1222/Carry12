@@ -163,12 +163,13 @@ class LeggedRobot(CarryBoxPerturb):
         self.projected_gravity_box[env_ids] = quat_rotate_inverse(
             self.box_states[env_ids, 3:7], self.gravity_vec[env_ids]
         )
+        tag_quat = self.box_states[env_ids, 3:7].repeat_interleave(4, dim=0)
+        tag_offset_local = self.tag_pos_local[env_ids].reshape(-1, 3)
+        tag_offset_world = quat_rotate(tag_quat, tag_offset_local).view(
+            len(env_ids), 4, 3
+        )
         self.tag_pos[env_ids] = (
-            quat_rotate(
-                self.box_states[env_ids, 3:7].unsqueeze(1).expand(-1, 4, -1),
-                self.tag_pos_local[env_ids],
-            )
-            + self.box_states[env_ids, :3].unsqueeze(1)
+            tag_offset_world + self.box_states[env_ids, :3].unsqueeze(1)
         )
 
     def _yaw_relative_to_robot(self, robot_quat, yaw_deg):
