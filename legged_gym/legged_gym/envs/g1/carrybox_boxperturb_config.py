@@ -75,8 +75,8 @@ class G1Cfg(CarryBoxPICfg):
 
         recovery_window_s = 1.0
         recovery_confirmed_carry_steps = 5
-        debug_force_event = True
-        debug_draw_force = True
+        debug_force_event = False
+        debug_draw_force = False
         # Viewer arrow length is |F| times this scale.
         # CarryBox forces are much smaller than FALCON hand forces, so retain
         # the FALCON bundle style but use a task-appropriate length scale.
