@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from legged_gym.envs.g1.carrybox_boxperturb import (
@@ -11,6 +12,9 @@ class LeggedRobot(CarryBoxPerturb):
     def _init_buffers(self):
         super()._init_buffers()
         self._debug_force_pulse_seen = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._debug_force_viewer_check_reported = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
 
@@ -221,6 +225,106 @@ class LeggedRobot(CarryBoxPerturb):
             return float(self._stage_probability())
         except Exception:
             return float("nan")
+
+    def _draw_debug_vis(self):
+        """Draw the instantaneous physical box perturbation force only."""
+        self.gym.clear_lines(self.viewer)
+        cfg = self.cfg.box_perturbation
+        if not bool(cfg.debug_draw_force):
+            return
+
+        scale = float(cfg.debug_force_draw_scale_m_per_N)
+        line_count = max(1, int(cfg.debug_force_bundle_line_count))
+        jitter = max(0.0, float(cfg.debug_force_bundle_jitter_m))
+        max_envs = min(self.num_envs, int(cfg.debug_force_draw_max_envs))
+        epsilon = 1.0e-6
+        color = np.asarray([0.851, 0.144, 0.07], dtype=np.float32)
+
+        for env_id in range(max_envs):
+            force_world_t = self.box_perturb_force_tensor[
+                env_id, int(self.box_net_contact_force_index), :
+            ]
+            magnitude = float(torch.linalg.vector_norm(force_world_t).item())
+            if magnitude <= epsilon:
+                self._debug_force_viewer_check_reported[env_id] = False
+                continue
+
+            box_com_world_t = self.box_states[env_id, 0:3]
+            env_origin_t = self.env_origins[env_id]
+            start_env_t = box_com_world_t - env_origin_t
+            # Tail is the box COM; head points along the external force applied
+            # by the environment to the box, not the humanoid reaction force.
+            draw_vector_t = force_world_t * scale
+            end_env_t = start_env_t + draw_vector_t
+
+            self._debug_log_force_viewer_check_once(
+                env_id,
+                force_world_t,
+                draw_vector_t,
+                box_com_world_t,
+                start_env_t,
+                env_origin_t,
+                epsilon,
+            )
+
+            start = start_env_t.detach().cpu().numpy()
+            end = end_env_t.detach().cpu().numpy()
+            if jitter > 0.0:
+                offset = (
+                    np.random.random((line_count, 3)).astype(np.float32) - 0.5
+                ) * jitter
+            else:
+                offset = np.zeros((line_count, 3), dtype=np.float32)
+            starts = np.repeat(start.reshape(1, 3), line_count, axis=0) + offset
+            ends = np.repeat(end.reshape(1, 3), line_count, axis=0) + offset
+            vertices = np.concatenate((starts, ends), axis=1).astype(np.float32)
+            colors = np.repeat(color.reshape(1, 3), line_count, axis=0)
+            self.gym.add_lines(
+                self.viewer,
+                self.envs[env_id],
+                line_count,
+                vertices,
+                colors,
+            )
+
+    def _debug_log_force_viewer_check_once(
+        self,
+        env_id,
+        force_world,
+        draw_vector,
+        box_com_world,
+        box_com_draw_frame,
+        env_origin,
+        epsilon,
+    ):
+        if bool(self._debug_force_viewer_check_reported[env_id].item()):
+            return
+
+        force_norm = torch.linalg.vector_norm(force_world)
+        draw_norm = torch.linalg.vector_norm(draw_vector)
+        if float(force_norm.item()) <= epsilon or float(draw_norm.item()) <= epsilon:
+            return
+
+        alignment = torch.dot(force_world / force_norm, draw_vector / draw_norm)
+        prefix = (
+            "[ForceViewerCheck]"
+            if float(alignment.item()) > 0.999
+            else "[ForceViewerCheck WARNING]"
+        )
+        print(
+            f"{prefix}\n"
+            f"step={self.common_step_counter}\n"
+            f"env={env_id}\n"
+            f"force_world={self._debug_list(force_world)}\n"
+            f"force_norm_N={float(force_norm.item()):.6f}\n"
+            f"draw_vector={self._debug_list(draw_vector)}\n"
+            f"draw_norm_m={float(draw_norm.item()):.6f}\n"
+            f"direction_alignment={float(alignment.item()):.9f}\n"
+            f"box_com_world={self._debug_list(box_com_world)}\n"
+            f"box_com_draw_frame={self._debug_list(box_com_draw_frame)}\n"
+            f"env_origin={self._debug_list(env_origin)}"
+        )
+        self._debug_force_viewer_check_reported[env_id] = True
 
     def _debug_includes_env0(self, env_ids):
         return bool((env_ids == 0).any().item()) if env_ids.numel() > 0 else False

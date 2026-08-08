@@ -2,8 +2,11 @@
 
 DEBUG_NUM_ENVS = 1
 DEBUG_EPISODE_LENGTH_S = 15
+# Trigger carry phase gate
 DEBUG_STABLE_CARRY_STEPS = 5
+# Egibility: True for constraint perturbation add
 DEBUG_FORCE_EVENT = True
+# Draw force vector in the scene
 DEBUG_DRAW_FORCE = True
 DEBUG_CARRY_GATE_LOG_INTERVAL_POLICY_STEPS = 5
 
