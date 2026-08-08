@@ -3,8 +3,6 @@ import math
 import numpy as np
 import torch
 from isaacgym.torch_utils import (
-    quat_from_angle_axis,
-    quat_mul,
     quat_rotate,
     quat_rotate_inverse,
 )
@@ -62,9 +60,6 @@ class LeggedRobot(CarryBoxPerturb):
 
         self.root_states[env_ids, 0:3] = root_pos_local + self.env_origins[env_ids]
         self.root_states[env_ids, 3:7] = root_quat.expand(len(env_ids), -1)
-        self.root_states[env_ids, 7:13] = 0.0
-        self.dof_pos[env_ids] = self.default_dof_pos.expand(len(env_ids), -1)
-        self.dof_vel[env_ids] = 0.0
 
     def _apply_fixed_box_state(self, env_ids):
         cfg = self._fixed_scene_cfg()
@@ -73,24 +68,15 @@ class LeggedRobot(CarryBoxPerturb):
             len(env_ids), -1
         )
         offset_world = quat_rotate(robot_quat, offset_local)
-        clearance = float(getattr(cfg, "box_clearance_m", 0.01))
 
         box_pos = self.root_states[env_ids, 0:3] + offset_world
-        box_pos[:, 2] = (
-            self.env_origins[env_ids, 2] + 0.5 * self._box_size[env_ids, 2] + clearance
-        )
-        box_quat = self._yaw_relative_to_robot(robot_quat, cfg.box_yaw_deg)
 
         self.box_states[env_ids, 0:3] = box_pos
-        self.box_states[env_ids, 3:7] = box_quat
-        self.box_states[env_ids, 7:13] = 0.0
 
         self.platform_pos[env_ids, 0:2] = box_pos[:, 0:2]
         self.platform_pos[env_ids, 2] = (
             box_pos[:, 2] - 0.5 * self._box_size[env_ids, 2] - self._platform_height
         )
-        self.platform_states[env_ids, 3:7] = self.default_quat.expand(len(env_ids), -1)
-        self.platform_states[env_ids, 7:13] = 0.0
 
     def _apply_fixed_goal_state(self, env_ids):
         cfg = self._fixed_scene_cfg()
@@ -111,23 +97,8 @@ class LeggedRobot(CarryBoxPerturb):
         distance = float(cfg.goal_distance_m)
         goal_xy = self.box_states[env_ids, 0:2] + distance * direction_xy
         self.goal_pos[env_ids, 0:2] = goal_xy
-        self.goal_pos[env_ids, 2] = (
-            self.env_origins[env_ids, 2] + float(self.cfg.rewards.target_box_height)
-        )
-        self.goal_rot[env_ids] = self._yaw_relative_to_robot(
-            robot_quat, cfg.goal_yaw_deg
-        )
 
         self.tar_platform_pos[env_ids, 0:2] = goal_xy
-        self.tar_platform_pos[env_ids, 2] = (
-            self.goal_pos[env_ids, 2]
-            - 0.5 * self._box_size[env_ids, 2]
-            - 0.5 * self._platform_height
-        )
-        self.tar_platform_states[env_ids, 3:7] = self.default_quat.expand(
-            len(env_ids), -1
-        )
-        self.tar_platform_states[env_ids, 7:13] = 0.0
 
     def _update_fixed_scene_derived_state(self, env_ids):
         self.robot2object_dir[env_ids] = (
@@ -172,16 +143,6 @@ class LeggedRobot(CarryBoxPerturb):
             tag_offset_world + self.box_states[env_ids, :3].unsqueeze(1)
         )
 
-    def _yaw_relative_to_robot(self, robot_quat, yaw_deg):
-        yaw = torch.full(
-            (robot_quat.shape[0],),
-            math.radians(float(yaw_deg)),
-            dtype=torch.float,
-            device=self.device,
-        )
-        yaw_quat = quat_from_angle_axis(yaw, self.z_axis_unit.expand(len(yaw), -1))
-        return quat_mul(robot_quat, yaw_quat)
-
     def _fixed_tensor(self, values):
         return torch.tensor(values, dtype=torch.float, device=self.device)
 
@@ -196,19 +157,24 @@ class LeggedRobot(CarryBoxPerturb):
         env_id = 0
         self._fixed_scene_reset_count += 1
         snapshot = {
-            "robot": torch.cat(
+            "robot_root_pose": torch.cat(
                 (
-                    self.root_states[env_id],
-                    self.dof_pos[env_id],
-                    self.dof_vel[env_id],
+                    self.root_states[env_id, 0:3],
+                    self.root_states[env_id, 3:7],
                 )
             ).detach().clone(),
-            "box": self.box_states[env_id].detach().clone(),
-            "goal": torch.cat(
+            "box_position": self.box_states[env_id, 0:3].detach().clone(),
+            "goal_xy": self.goal_pos[env_id, 0:2].detach().clone(),
+            "target_platform_xy": self.tar_platform_pos[env_id, 0:2].detach().clone(),
+            "parent_sampled_state": torch.cat(
                 (
-                    self.goal_pos[env_id],
+                    self.root_states[env_id, 7:13],
+                    self.dof_pos[env_id],
+                    self.dof_vel[env_id],
+                    self.box_states[env_id, 3:13],
                     self.goal_rot[env_id],
-                    self.tar_platform_pos[env_id],
+                    self.goal_pos[env_id, 2:3],
+                    self.tar_platform_pos[env_id, 2:3],
                 )
             ).detach().clone(),
         }
@@ -247,12 +213,20 @@ class LeggedRobot(CarryBoxPerturb):
             f"goal_rot={self._debug_list(self.goal_rot[env_id])}\n"
             f"target_platform_pos={self._debug_list(self.tar_platform_pos[env_id])}\n"
             f"box_goal_distance_xy={box_goal_distance_xy:.6f}\n"
-            f"robot_state_identical_to_previous={identical['robot']}\n"
-            f"box_state_identical_to_previous={identical['box']}\n"
-            f"goal_state_identical_to_previous={identical['goal']}\n"
-            f"robot_state_max_abs_delta={max_delta['robot']:.9f}\n"
-            f"box_state_max_abs_delta={max_delta['box']:.9f}\n"
-            f"goal_state_max_abs_delta={max_delta['goal']:.9f}"
+            f"fixed_robot_root_pose_identical_to_previous={identical['robot_root_pose']}\n"
+            f"fixed_box_position_identical_to_previous={identical['box_position']}\n"
+            f"fixed_goal_xy_identical_to_previous={identical['goal_xy']}\n"
+            f"fixed_target_platform_xy_identical_to_previous={identical['target_platform_xy']}\n"
+            f"parent_sampled_state_identical_to_previous={identical['parent_sampled_state']}\n"
+            f"fixed_robot_root_pose_max_abs_delta={max_delta['robot_root_pose']:.9f}\n"
+            f"fixed_box_position_max_abs_delta={max_delta['box_position']:.9f}\n"
+            f"fixed_goal_xy_max_abs_delta={max_delta['goal_xy']:.9f}\n"
+            f"fixed_target_platform_xy_max_abs_delta={max_delta['target_platform_xy']:.9f}\n"
+            f"parent_sampled_state_max_abs_delta={max_delta['parent_sampled_state']:.9f}\n"
+            f"add_noise={bool(self.add_noise)}\n"
+            f"box_pos_noise_scale={float(self.box_cfg.pos_noise_scale):.6f}\n"
+            f"box_ang_noise_scale={float(self.box_cfg.ang_noise_scale):.6f}\n"
+            f"box_reset_mode={self.box_cfg.reset_mode}"
         )
 
     def _update_box_perturbation_state(self):
