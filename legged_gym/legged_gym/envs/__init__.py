@@ -41,8 +41,8 @@ from .g1.carrybox_resume_config import G1Cfg as G1CarryBoxResumeCfg
 from .g1.carrybox_resume_config import G1CfgPPO as G1CarryBoxResumeCfgPPO
 
 from .g1.carrybox_boxperturb import LeggedRobot as G1CarryBoxPerturb
-from .g1.carrybox_boxperturb_resume_config import G1Cfg as G1CarryBoxPerturbCfg
-from .g1.carrybox_boxperturb_resume_config import G1CfgPPO as G1CarryBoxPerturbCfgPPO
+from .g1.carrybox_boxperturb_config import G1Cfg as G1CarryBoxPerturbCfg
+from .g1.carrybox_boxperturb_config import G1CfgPPO as G1CarryBoxPerturbCfgPPO
 
 task_registry.register( "carrybox", G1CarryBox, G1CarryBoxCfg(), G1CarryBoxCfgPPO() )
 task_registry.register( "carrybox_resume", G1CarryBox, G1CarryBoxResumeCfg(), G1CarryBoxResumeCfgPPO() )
