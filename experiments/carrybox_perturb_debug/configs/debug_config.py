@@ -21,7 +21,7 @@ FIXED_ROBOT_ORIENTATION = [0.0, 0.0, 1.0, 0.0]
 # Robot-local xyz offset. With the default 180-degree yaw this puts the box at
 # env-local [0.55, 0.0, 0.135] without changing the parent-sampled box rotation.
 FIXED_BOX_OFFSET_ROBOT_LOCAL = [1.75, 0.0, -0.665]
-FIXED_GOAL_DISTANCE_M = 4.0
+FIXED_GOAL_DISTANCE_M = 8.0
 FIXED_GOAL_BEARING_DEG = 0.0
 
 
