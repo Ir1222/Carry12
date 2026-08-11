@@ -76,6 +76,7 @@ def parse_evaluator_args():
     )
     parser.add_argument("--sweep", action="store_true", default=False)
     parser.add_argument("--save_csv", action="store_true", default=False)
+    parser.add_argument("--no_force", action="store_true", default=False)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--verbose", action="store_true", default=False)
     parser.add_argument("--directions", type=_parse_str_list, default=DEFAULT_DIRECTIONS)
@@ -164,9 +165,48 @@ def _policy_step(env, policy, obs):
     return env.step(actions.detach())
 
 
+def _short_values(tensor, count=10):
+    values = tensor.detach().cpu().reshape(-1).tolist()
+    return [round(float(value), 6) for value in values[:count]]
+
+
+def _print_pre_rollout_snapshot(env, obs):
+    cfg = env.cfg
+    reset_mode = getattr(getattr(cfg.asset, "box", None), "reset_mode", "unknown")
+    randomize_initial_joint_pos = getattr(
+        cfg.domain_rand, "randomize_initial_joint_pos", "unknown"
+    )
+    obs_norm = float(torch.linalg.vector_norm(obs[0]).item())
+    obs_digest = torch.sum(obs[0] * torch.arange(
+        1, obs.shape[1] + 1, device=obs.device, dtype=obs.dtype
+    ))
+    print("[PRE_FORCE_SNAPSHOT]")
+    print(f"box.reset_mode={reset_mode}")
+    print(f"env.test={bool(cfg.env.test)}")
+    print(f"domain_rand.disturbance={bool(cfg.domain_rand.disturbance)}")
+    print(f"domain_rand.delay={bool(cfg.domain_rand.delay)}")
+    print(f"domain_rand.push_robots={bool(cfg.domain_rand.push_robots)}")
+    print(f"noise.add_noise={bool(cfg.noise.add_noise)}")
+    print(f"randomize_initial_joint_pos={bool(randomize_initial_joint_pos)}")
+    print(f"root_pos={_short_values(env.root_states[0, 0:3])}")
+    print(f"root_quat={_short_values(env.root_states[0, 3:7])}")
+    print(f"root_lin_vel={_short_values(env.root_states[0, 7:10])}")
+    print(f"root_ang_vel={_short_values(env.root_states[0, 10:13])}")
+    print(f"dof_pos_norm={float(torch.linalg.vector_norm(env.dof_pos[0]).item()):.6f}")
+    print(f"dof_pos_first10={_short_values(env.dof_pos[0], count=10)}")
+    print(f"dof_vel_norm={float(torch.linalg.vector_norm(env.dof_vel[0]).item()):.6f}")
+    print(f"box_pose={_short_values(torch.cat((env.box_states[0, 0:3], env.box_states[0, 3:7])))}")
+    print(f"goal={_short_values(env.goal_pos[0])}")
+    print(f"obs_norm={obs_norm:.6f}")
+    print(f"obs_digest={float(obs_digest.item()):.6f}")
+    print(f"obs_first10={_short_values(obs[0], count=10)}")
+    print(f"actor_history_shape={tuple(obs.shape)}")
+
+
 def _reset_for_trial(env, seed):
     set_seed(int(seed))
-    env.end_box_perturb_trace()
+    if env.box_perturb_trace_enabled:
+        env.end_box_perturb_trace()
     env.reset()
     return env.get_observations()
 
@@ -178,6 +218,8 @@ def _phase_steps(seconds, policy_dt):
 def run_trial(env, policy, obs, condition, checkpoint, eval_args):
     _print_trial_header(condition)
     obs = _reset_for_trial(env, condition.seed)
+    if eval_args.verbose:
+        _print_pre_rollout_snapshot(env, obs)
     signature = env.evaluation_initial_state_signature(env_id=0)
     if eval_args.save_csv:
         print(f"[SIGNATURE] sha1={signature['sha1']}")
@@ -192,8 +234,9 @@ def run_trial(env, policy, obs, condition, checkpoint, eval_args):
         "ramp_up_s": condition.ramp_up_s,
         "ramp_down_s": condition.ramp_down_s,
     }
-    env.begin_box_perturb_trace(metadata=trace_metadata, verbose=eval_args.verbose)
-    env.set_box_perturb_trace_phase("wait_carry")
+    if eval_args.save_csv:
+        env.begin_box_perturb_trace(metadata=trace_metadata, verbose=eval_args.verbose)
+        env.set_box_perturb_trace_phase("wait_carry")
 
     threshold = int(env.cfg.box_perturbation.stable_confirmed_carry_policy_steps)
     pre_force_steps = _phase_steps(eval_args.pre_force_delay, env.dt)
@@ -206,6 +249,9 @@ def run_trial(env, policy, obs, condition, checkpoint, eval_args):
     direction_world_t = None
     samples = []
     failure = {"physical_failure": False, "termination_reason": ""}
+    if eval_args.no_force:
+        print("[NO_FORCE]")
+        print("External force scheduling disabled; running nominal CarryBox rollout.")
 
     for _ in range(int(env.max_episode_length) + post_force_steps + 10):
         obs, _, _, dones, _, termination_ids, _, _ = _policy_step(env, policy, obs)
@@ -218,6 +264,9 @@ def run_trial(env, policy, obs, condition, checkpoint, eval_args):
             failure["termination_reason"] = reason or "done"
             break
 
+        if eval_args.no_force:
+            continue
+
         if phase == "WAIT_CARRY":
             if int(env.confirmed_carry_streak[0].item()) >= threshold:
                 print("[STATE]")
@@ -226,7 +275,8 @@ def run_trial(env, policy, obs, condition, checkpoint, eval_args):
                 print("CONFIRMED_CARRY -> PRE_FORCE")
                 phase = "PRE_FORCE"
                 pre_count = 0
-                env.set_box_perturb_trace_phase("pre")
+                if eval_args.save_csv:
+                    env.set_box_perturb_trace_phase("pre")
 
         elif phase == "PRE_FORCE":
             if not bool(env.confirmed_carry_buf[0].item()):
@@ -234,7 +284,8 @@ def run_trial(env, policy, obs, condition, checkpoint, eval_args):
                 print("PRE_FORCE -> WAIT_CARRY")
                 phase = "WAIT_CARRY"
                 pre_count = 0
-                env.set_box_perturb_trace_phase("wait_carry")
+                if eval_args.save_csv:
+                    env.set_box_perturb_trace_phase("wait_carry")
             else:
                 pre_count += 1
                 if pre_count >= pre_force_steps:
@@ -276,7 +327,8 @@ def run_trial(env, policy, obs, condition, checkpoint, eval_args):
                     sample_policy_metrics(env, direction_world_t, force_start)
                 )
             if int(env.box_perturb_remaining_physics_steps[0].item()) == 0:
-                env.set_box_perturb_trace_phase("post_force")
+                if eval_args.save_csv:
+                    env.set_box_perturb_trace_phase("post_force")
                 print("[FORCE OFF]")
                 print(f"duration={float(env.box_perturb_pulse_duration_s[0].item()):.6f}s")
                 print(f"impulse={float(env.box_perturb_eval_impulse_Ns[0].item()):.6f}Ns")
@@ -292,7 +344,7 @@ def run_trial(env, policy, obs, condition, checkpoint, eval_args):
             if post_count >= post_force_steps:
                 break
 
-    trace_rows = env.end_box_perturb_trace()
+    trace_rows = env.end_box_perturb_trace() if eval_args.save_csv else []
     summary = summarize_trial(
         condition=condition,
         checkpoint=checkpoint,
@@ -314,6 +366,10 @@ def run_trial(env, policy, obs, condition, checkpoint, eval_args):
 
 def play(eval_args, legged_args):
     requested_task = legged_args.task
+    if requested_task == "g1":
+        print("[ARGS] --task was not provided; defaulting to carrybox_perturb.")
+        requested_task = BASE_TASK
+        legged_args.task = BASE_TASK
     base_task = _base_task_from_args(requested_task)
 
     env_cfg, train_cfg = task_registry.get_cfgs(name=base_task)
@@ -330,6 +386,7 @@ def play(eval_args, legged_args):
 
     _register_eval_task(env_cfg, train_cfg)
     env, _ = task_registry.make_env(name=EVAL_TASK, args=legged_args, env_cfg=env_cfg)
+    print(f"[CONFIG] box.reset_mode={env.box_cfg.reset_mode}")
     obs = env.get_observations()
 
     ppo_runner, train_cfg = task_registry.make_alg_runner(

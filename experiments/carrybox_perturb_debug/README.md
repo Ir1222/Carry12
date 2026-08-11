@@ -37,6 +37,21 @@ conda activate <your_isaacgym_env>
 
 后者会被 argparse 当成新的命令行选项，导致命令不可用。
 
+最稳妥的方式是复制本文中的“单行命令”。多行命令里的反斜杠 `\` 是 Bash 续行符，`\` 后面必须立刻换到下一行参数，不能插入空行。例如你如果输入：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+
+```
+
+Bash 会在空行处结束命令，只执行 `evaluate.py`，后面的 `--task`、`--resume_path` 就会被当成新的 shell 命令，于是出现：
+
+```text
+--task: command not found
+```
+
+所以如果不熟悉 Bash 续行，直接用单行命令。
+
 ## 当前执行路径
 
 `evaluate.py` 的执行路径是：
@@ -248,6 +263,14 @@ ramp_down = 0.15 s
 
 命令：
 
+推荐复制这个单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --profile smooth_hold --direction=-box_y --beta 0.5 --hold_duration 1.0 --seed 1
+```
+
+等价的多行写法如下。注意每一行末尾的 `\` 后面不能有空行：
+
 ```bash
 python3 experiments/carrybox_perturb_debug/evaluate.py \
   --task carrybox_perturb \
@@ -265,6 +288,37 @@ python3 experiments/carrybox_perturb_debug/evaluate.py \
 - 想确认 smooth_hold 箭头是否 ramp up、hold、ramp down。
 - 想手动比较不同 checkpoint，但每次仍然只加载一个 checkpoint。
 
+## 命令 1A：Viewer 无外力 parity 测试
+
+用途：只验证 evaluator 初始化、reset、Actor 加载和命令速度是否能复现正常 CarryBox 行为，不调度任何外力。
+
+特点：
+
+- 不进入外力调度
+- 不测试 `smooth_hold`
+- 用来排查 confirmed carry 之前的站立、approach、pickup regression
+- 这是调 force profile 前必须先通过的 baseline parity 测试
+
+推荐复制这个单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --seed 1 --no_force
+```
+
+PI checkpoint：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/logs/Jul09_from_55500/model_73500.pt --seed 1 --no_force
+```
+
+如果要看 pre-force/reset 诊断：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --seed 1 --no_force --verbose
+```
+
+`--verbose` 会打印一次 `[PRE_FORCE_SNAPSHOT]`，包括 `box.reset_mode`、root velocity、DOF norm、box pose、goal、obs norm 和 observation digest。
+
 ## 命令 2：Headless 单条件并保存 CSV
 
 用途：无 viewer 跑一个 trial，并保存 trace CSV 和 summary CSV。
@@ -277,6 +331,14 @@ python3 experiments/carrybox_perturb_debug/evaluate.py \
 - 适合先验证 CSV 输出和 initial-state signature
 
 命令：
+
+推荐复制这个单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --profile smooth_hold --direction=-box_y --beta 0.5 --hold_duration 1.0 --seed 1 --headless --save_csv --output_dir experiments/carrybox_perturb_debug/results/official_single
+```
+
+等价的多行写法如下。注意每一行末尾的 `\` 后面不能有空行：
 
 ```bash
 python3 experiments/carrybox_perturb_debug/evaluate.py \
@@ -326,6 +388,14 @@ seeds:      1, 2, 3
 
 命令：
 
+推荐复制这个单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --profile smooth_hold --sweep --headless --save_csv --output_dir experiments/carrybox_perturb_debug/results/official
+```
+
+等价的多行写法如下。注意每一行末尾的 `\` 后面不能有空行：
+
 ```bash
 python3 experiments/carrybox_perturb_debug/evaluate.py \
   --task carrybox_perturb \
@@ -353,6 +423,14 @@ python3 experiments/carrybox_perturb_debug/evaluate.py \
 - 比默认 216 trial 快很多
 
 命令：
+
+推荐复制这个单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --profile smooth_hold --sweep --directions=+box_x,-box_x --betas=0.1,0.3 --seeds=1,2 --hold_durations=1.0 --headless --save_csv --output_dir experiments/carrybox_perturb_debug/results/smoke_sweep
+```
+
+等价的多行写法如下。注意每一行末尾的 `\` 后面不能有空行：
 
 ```bash
 python3 experiments/carrybox_perturb_debug/evaluate.py \
@@ -393,6 +471,14 @@ python3 experiments/carrybox_perturb_debug/evaluate.py \
 
 Viewer 命令：
 
+推荐复制这个单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --profile half_sine --direction=+box_x --beta 0.5 --pulse_duration 0.10 --seed 1
+```
+
+等价的多行写法如下。注意每一行末尾的 `\` 后面不能有空行：
+
 ```bash
 python3 experiments/carrybox_perturb_debug/evaluate.py \
   --task carrybox_perturb \
@@ -405,6 +491,14 @@ python3 experiments/carrybox_perturb_debug/evaluate.py \
 ```
 
 Headless CSV 命令：
+
+推荐复制这个单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --profile half_sine --direction=+box_x --beta 0.5 --pulse_duration 0.10 --seed 1 --headless --save_csv --output_dir experiments/carrybox_perturb_debug/results/half_sine_single
+```
+
+等价的多行写法如下。注意每一行末尾的 `\` 后面不能有空行：
 
 ```bash
 python3 experiments/carrybox_perturb_debug/evaluate.py \
@@ -431,6 +525,14 @@ python3 experiments/carrybox_perturb_debug/evaluate.py \
 
 official：
 
+单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --profile smooth_hold --sweep --headless --save_csv --output_dir experiments/carrybox_perturb_debug/results/official
+```
+
+多行写法：
+
 ```bash
 python3 experiments/carrybox_perturb_debug/evaluate.py \
   --task carrybox_perturb \
@@ -444,6 +546,14 @@ python3 experiments/carrybox_perturb_debug/evaluate.py \
 
 retrained：
 
+单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path <retrained_checkpoint.pt> --profile smooth_hold --sweep --headless --save_csv --output_dir experiments/carrybox_perturb_debug/results/retrained
+```
+
+多行写法：
+
 ```bash
 python3 experiments/carrybox_perturb_debug/evaluate.py \
   --task carrybox_perturb \
@@ -456,6 +566,14 @@ python3 experiments/carrybox_perturb_debug/evaluate.py \
 ```
 
 PI-trained：
+
+单行命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py --task carrybox_perturb --resume_path <pi_checkpoint.pt> --profile smooth_hold --sweep --headless --save_csv --output_dir experiments/carrybox_perturb_debug/results/pi
+```
+
+多行写法：
 
 ```bash
 python3 experiments/carrybox_perturb_debug/evaluate.py \
@@ -511,6 +629,10 @@ box-local 负 y 方向。负方向必须使用等号。
 `--save_csv`
 
 保存 trace CSV 和 summary CSV。
+
+`--no_force`
+
+运行 evaluator 的 nominal CarryBox rollout，但完全不调度外力。用于检查 evaluator 是否在 confirmed carry 和 force 之前已经和 `play_debug.py` 保持行为一致。
 
 `--sweep`
 

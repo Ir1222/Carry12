@@ -21,7 +21,6 @@ def apply_evaluation_config(env_cfg, verbose=False, trace_enabled=False, draw_fo
 
     if hasattr(env_cfg.asset, "box"):
         env_cfg.asset.box.random_props = False
-        env_cfg.asset.box.reset_mode = "default"
 
     perturb_cfg = env_cfg.box_perturbation
     perturb_cfg.enabled = True
