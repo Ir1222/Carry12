@@ -1,563 +1,684 @@
-# carrybox_perturb_debug 使用指南
+# carrybox_perturb_debug 控制评估说明
 
-这个目录是 `carrybox_perturb` 的独立 debug/evaluation layer，用来检查 box perturbation 是否真正 trigger、schedule、commit、apply。它不复制 `carrybox_PI.py` / `carrybox_boxperturb.py`，也不要求修改正式 task 的核心实现。
+这个目录是 `carrybox_perturb` 的实验层，用于两类事情：
 
-## 当前结构
+- `play_debug.py`：调试外力链路是否触发、提交、绘制、真实施加。
+- `evaluate.py`：做受控 rollout 评估，用同一组外力条件比较不同 Actor checkpoint 的响应。
+
+这里不会修改 baseline 任务、Actor observation、Critic、PPO、训练流程，也不会一次加载多个策略。每次命令只加载一个 Actor checkpoint。
+
+## Ubuntu 运行前提
+
+所有命令都假设你在仓库根目录运行：
+
+```bash
+cd /path/to/PhysHSI
+```
+
+如果你的环境里 `python` 指向正确的 Conda/Isaac Gym Python，也可以把下面命令里的 `python3` 替换成 `python`。
+
+如果你还没有激活 Isaac Gym 环境，先激活你的环境，例如：
+
+```bash
+conda activate <your_isaacgym_env>
+```
+
+注意：方向参数里 `-box_x`、`-box_y` 以 `-` 开头，在 Bash 里必须用等号写法：
+
+```bash
+--direction=-box_y
+```
+
+不要写成：
+
+```bash
+--direction -box_y
+```
+
+后者会被 argparse 当成新的命令行选项，导致命令不可用。
+
+## 当前执行路径
+
+`evaluate.py` 的执行路径是：
 
 ```text
-experiments/carrybox_perturb_debug/
-├── play_debug.py
-├── configs/
-│   ├── __init__.py
-│   └── debug_config.py
-└── envs/
-    ├── __init__.py
-    └── carrybox_perturb_debug.py
+evaluate.py
+-> 读取 carrybox_perturb baseline cfg
+-> apply_evaluation_config()
+-> 临时注册 carrybox_perturb_eval
+-> 创建 env
+-> 创建 PPO runner，但不 resume Critic
+-> load_actor_only_for_inference()
+-> 只加载 checkpoint 里的 actor.* 和 std
+-> rollout 一个或多个受控 trial
 ```
 
-继承关系：
+物理外力路径仍复用 baseline 的箱体 COM 外力逻辑：
+
+```python
+gym.apply_rigid_body_force_tensors(
+    ...,
+    space=gymapi.CoordinateSpace.GLOBAL_SPACE,
+)
+```
+
+外力施加点是 box center of mass，不添加偏心力矩。
+
+## Debug 和 Evaluation 的区别
+
+`play_debug.py` 适合回答：
+
+- 外力有没有触发？
+- viewer 里箭头方向对不对？
+- carry gate 为什么没过？
+- force tensor 有没有真实写入？
+
+`evaluate.py` 适合回答：
+
+- 同一个外力条件下，不同 Actor checkpoint 的响应是否不同？
+- perturbation recovery 怎么样？
+- sustained object-mediated force following 响应怎么样？
+- 箱子、机器人、手-箱耦合的原始指标是多少？
+
+正式比较 checkpoint 时，用 `evaluate.py`，不要用 `play_debug.py`。
+
+## 受控场景
+
+评估模式保留当前 fixed-scene 设计：
+
+- `num_envs = 1`
+- 初始机器人 pose 固定
+- box placement 固定
+- goal placement 固定
+- seed 可控
+- legacy robot disturbance 关闭
+- delay 关闭
+- `push_robots` 关闭
+- box random properties 关闭
+
+同一个 seed 和同一个 force condition，换不同 checkpoint 时，非策略实验条件应保持一致。
+
+启用 `--save_csv` 时，`summary.csv` 会保存 initial-state signature，包括：
+
+- robot root pose
+- robot root linear/angular velocity
+- DOF position
+- DOF velocity
+- box pose
+- box linear/angular velocity
+- goal
+- box mass
+
+这个 signature 只用于评估记录，不会加入 policy observation。
+
+## Trial 定义
+
+一个 trial 等于一个 episode，也等于一个 force condition：
 
 ```text
-carrybox_PI.LeggedRobot
--> carrybox_boxperturb.LeggedRobot
--> experiments/carrybox_perturb_debug/envs/carrybox_perturb_debug.LeggedRobot
+RESET
+-> APPROACH / PICKUP
+-> WAIT_CONFIRMED_CARRY
+-> PRE_FORCE
+-> APPLY ONE CONTROLLED FORCE CONDITION
+-> POST_FORCE
+-> TRIAL_END
 ```
 
-`play_debug.py` 会在当前 Python 进程里临时注册 `carrybox_perturb_debug` task。这个注册不是写入 `legged_gym/legged_gym/envs/__init__.py` 的永久注册，所以删除整个 `experiments/carrybox_perturb_debug/` 后，不会留下新的 debug task coupling。
+一个 episode 内不会 sweep 多个不同外力条件，避免前一次扰动污染下一次评估。
 
-## 标准运行命令
-
-PI-trained Actor：
-
-```powershell
-python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb --resume_path legged_gym/logs/Jul09_from_55500/model_73500.pt
-```
-
-official CarryBox Actor：
-
-```powershell
-python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt
-```
-
-也可以写成：
-
-```powershell
-python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb_debug --resume_path legged_gym/resources/ckpt/carrybox.pt
-```
-
-`--task carrybox_perturb` 和 `--task carrybox_perturb_debug` 在这个脚本里都会使用 debug subclass。保留 `--task carrybox_perturb` 是为了命令习惯和 baseline config 来源清晰。
-
-## 当前默认 debug 配置
-
-默认配置集中在 `configs/debug_config.py`：
-
-```python
-DEBUG_NUM_ENVS = 1
-DEBUG_EPISODE_LENGTH_S = 30
-DEBUG_STABLE_CARRY_STEPS = 5
-DEBUG_FORCE_EVENT = True
-DEBUG_DRAW_FORCE = True
-DEBUG_CARRY_GATE_LOG_INTERVAL_POLICY_STEPS = 5
-DEBUG_TRIGGER_MODE = "confirmed_carry"
-DEBUG_TRIGGER_POLICY_STEP = 100
-DEBUG_RELAXED_REQUIRE_HEIGHT_GATE = True
-DEBUG_RELAXED_REQUIRE_STATIC_GATE = False
-DEBUG_RELAXED_CONTACT_MODE = "either"
-DEBUG_RELAXED_STABLE_STEPS = 1
-DEBUG_COMMAND_X = 0.4
-DEBUG_COMMAND_Y = 0.0
-DEBUG_COMMAND_YAW = 0.0
-```
-
-`apply_debug_config(env_cfg)` 会在 `task_registry.make_env()` 之前执行。这个时机很重要，因为 `carrybox_boxperturb._init_buffers()` 里会读取：
-
-```python
-self.debug_viz = bool(self.cfg.box_perturbation.debug_draw_force)
-```
-
-所以 `debug_draw_force` 必须在 env 初始化前设置。
-
-当前 override：
+外力释放后默认继续运行：
 
 ```text
-env.num_envs = 1
-env.episode_length_s = 15
-env.test = True
-domain_rand.disturbance = False
-domain_rand.delay = False
-domain_rand.push_robots = False
-asset.box.random_props = False
-asset.box.reset_mode = "default"
-box_perturbation.enabled = True
-box_perturbation.debug_force_event = True
-box_perturbation.debug_draw_force = True
-box_perturbation.stable_confirmed_carry_policy_steps = 5
-box_perturbation.debug_carry_gate_log_interval_policy_steps = 5
-box_perturbation.debug_trigger_mode = "confirmed_carry"
-box_perturbation.debug_trigger_policy_step = 100
-debug_command.lin_vel_x = 0.4
+POST_FORCE_OBSERVATION_S = 2.0
 ```
 
-Debug trigger modes:
+如果已有物理失败 termination 先发生，则提前结束并记录失败原因。
 
-```python
-# Default/current semantics: perturb only after confirmed carry.
-DEBUG_TRIGGER_MODE = "confirmed_carry"
+## Confirmed Carry 触发
 
-# Force-chain diagnostic: schedule once after reset, regardless of carry_phase.
-DEBUG_TRIGGER_MODE = "time_after_reset"
-DEBUG_TRIGGER_POLICY_STEP = 100
-
-# Relaxed gate diagnostic: log original gate and relaxed gate side by side.
-DEBUG_TRIGGER_MODE = "relaxed_carry"
-DEBUG_RELAXED_REQUIRE_HEIGHT_GATE = True
-DEBUG_RELAXED_REQUIRE_STATIC_GATE = False
-DEBUG_RELAXED_CONTACT_MODE = "either"  # "both", "either", or "none"
-DEBUG_RELAXED_STABLE_STEPS = 1
-```
-
-`time_after_reset` and `relaxed_carry` are diagnostics only. They reuse the
-same `_schedule_box_perturbation()` / `_commit_box_perturbation()` / Isaac Gym
-force tensor path, but they are not valid carry robustness metrics unless the
-original `[CarryGate]` also reports real carry.
-
-## 日志怎么看
-
-debug subclass 只做 diagnostics / instrumentation，不改 perturb 算法。
-
-### `[CarryGate]`
-
-每隔 `DEBUG_CARRY_GATE_LOG_INTERVAL_POLICY_STEPS` 个 policy step 打印一次 env 0 的 carry gate 状态：
+外力不能在第一次看到 `carry_phase=True` 时立刻施加。评估器使用：
 
 ```text
-[CarryGate]
-step=...
-env=0
-carry_phase=...
-confirmed=...
-streak=...
-projected_streak_before_update=...
-eligible_before_decision=...
-decision_made=...
-event_count=...
-stage=...
-probability=...
-clearance=...
-height_gate=...
-static_gate=...
-left_contact=...
-right_contact=...
-left_contact_norm_N=...
-right_contact_norm_N=...
-rel_lin_vel=...
-box_ang_vel=...
+stable_confirmed_carry_policy_steps = 10
+PRE_FORCE_DELAY_S = 0.20
 ```
 
-如果一直没有 perturb，先看：
+实际触发逻辑：
 
 ```text
-height_gate 是否 True
-static_gate 是否 True
-left_contact / right_contact 是否同时 True
-confirmed 是否 True
-streak 是否达到 threshold
-eligible_before_decision 是否 True
+confirmed carry 连续满足 10 个 policy step
+-> CONFIRMED_CARRY
+-> 再稳定等待 0.20 s
+-> FORCE ON
 ```
 
-当前 confirmed carry 的原始链条是：
+如果 pre-force delay 中 confirmed carry 丢失，则回到 `WAIT_CONFIRMED_CARRY`，不会盲目施加外力。
+
+## 方向语义
+
+默认评估方向：
 
 ```text
-box clearance / height gate
-+ static gate
--> carry_phase_buf
-
-left hand contact
-+ right hand contact
--> both_contact
-
-carry_phase_buf & both_contact
--> confirmed_carry_buf
--> confirmed_carry_streak
++box_x
+-box_x
++box_y
+-box_y
 ```
 
-### `[PerturbSchedule]`
+box-local 方向会在 force commit 时用 `q_box(t0)` 转成 world direction，并且只转换一次。之后整个 force event 中 `direction_world` 冻结不变，即使箱子旋转也不会重新计算方向。
 
-env 0 被 scheduler 选中时立即打印：
+## 力大小
+
+力大小使用归一化定义：
 
 ```text
-[PerturbSchedule]
-step=...
-env=0
-eligible=True
-stage=...
-probability=...
-decision_made=...
-event_count=...
-threshold=...
-debug_force_event=...
-scheduled=True
+F_peak = beta * m_box * g
 ```
 
-如果 `[CarryGate]` 里 `eligible_before_decision=True`，但没有 `[PerturbSchedule]`，通常说明 `debug_force_event=False` 且 Bernoulli 没采中，或者 env 0 不是被 schedule 的 env。
-
-### `[PerturbCommit]`
-
-`_commit_box_perturbation()` 后立即打印：
+默认 sweep beta：
 
 ```text
-[PerturbCommit]
-step=...
-env=0
-label=...
-event_count=...
-beta=...
-peak_force_N=...
-direction_world=[...]
-applied_force_world=[...]
-applied_magnitude_N=...
-elapsed_steps=...
-remaining_steps=...
+0.1, 0.3, 0.5, 0.7, 0.9, 1.1
 ```
 
-注意：commit 刚结束时，`applied_force_world` 可能还是 0，因为真正的 force 是在后续 physics substep 里由 `_apply_box_perturbation_force()` 写入。
+可以用 `--betas=...` 指定其他 beta 组。
 
-### `[PerturbApplied]`
+## 外力 profile
 
-force pulse 开始和结束时打印：
+### half_sine
+
+短脉冲扰动，用于 perturbation robustness / recovery：
 
 ```text
-[PerturbApplied]
-phase=start 或 end
-step=...
-env=0
-force_world=[...]
-magnitude_N=...
-peak_N=...
-beta=...
-direction_world=[...]
-elapsed_steps=...
-remaining_steps=...
+F(t) = F_peak * sin(pi * t / T) * direction_world
 ```
 
-这个日志用于确认物理力是否真的写进 `box_perturb_force_tensor` 并通过 Isaac Gym force tensor API apply。
-
-## 可以通过命令行改变的内容
-
-这些适合临时切换，不需要改代码。
-
-### 换 checkpoint
-
-```powershell
-python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb --resume_path <checkpoint>
-```
-
-只改变 Actor checkpoint，debug env/config 不变。脚本复用 `play_ActorOnly.load_actor_only_for_inference()`，只加载：
+默认：
 
 ```text
-actor.*
-std
+T = 0.10 s
 ```
 
-不会加载 checkpoint critic。
+对应参数：
 
-### 指定随机种子
-
-```powershell
-python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --seed 1
+```bash
+--profile half_sine --pulse_duration 0.10
 ```
 
-用于复现实验中的随机 stage direction / beta / Bernoulli sample。
+### smooth_hold
 
-### 临时改变 env 数量
-
-```powershell
-python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --num_envs 4
-```
-
-注意：虽然 `debug_config.py` 默认 `DEBUG_NUM_ENVS = 1`，但 `task_registry.make_env()` 内部还会调用 `update_cfg_from_args()`，所以命令行 `--num_envs` 会覆盖 debug config。
-
-当前日志主要盯 env 0。多 env 可以用来提高触发概率或观察并行行为，但日志不会逐个 env 全量打印。
-
-### headless 运行
-
-```powershell
-python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --headless
-```
-
-用于只看日志，不看 viewer arrow。`debug_draw_force=True` 仍然可以保留，但 headless 下不会显示 viewer。
-
-### 切换设备
-
-```powershell
-python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --rl_device cuda:0
-```
-
-或 CPU 调试：
-
-```powershell
-python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb --resume_path legged_gym/resources/ckpt/carrybox.pt --rl_device cpu
-```
-
-CPU 是否可用取决于本机 Isaac Gym / PhysX 环境。
-
-## 可以通过 debug_config.py 改变的测试效果
-
-这些是 experiment-only 固定配置，适合写在 `configs/debug_config.py`。
-
-### 1. 更快确认 trigger pipeline
-
-当前就是这个模式：
-
-```python
-DEBUG_STABLE_CARRY_STEPS = 5
-DEBUG_FORCE_EVENT = True
-```
-
-含义：
+持续平滑外力，用于 object-mediated force following：
 
 ```text
-confirmed_carry_streak >= 5 后 eligible
-eligible 后 probability 强制为 1.0
+0 -> half-cosine ramp up -> constant hold -> half-cosine ramp down -> 0
 ```
 
-用途：验证 trigger -> schedule -> commit -> apply 是否通。
-
-### 2. 接近正式配置
-
-把 threshold 改回正式值：
-
-```python
-DEBUG_STABLE_CARRY_STEPS = 20
-```
-
-用途：确认正式 gating 下是否能自然触发。
-
-### 3. 测 Bernoulli / stage probability
-
-关闭强制 event：
-
-```python
-DEBUG_FORCE_EVENT = False
-```
-
-此时 probability 来自当前 stage：
+默认：
 
 ```text
-C1: 0.25
-C2: 0.40
-C3: 0.50
-C4: 0.60
+ramp_up = 0.15 s
+hold_duration = 1.0 s
+ramp_down = 0.15 s
 ```
 
-用途：检查不是“强制触发”时，真实 staged schedule 是否能触发。
-
-### 4. 固定测试某个 stage
-
-可以在 `apply_debug_config()` 里加入：
-
-```python
-env_cfg.box_perturbation.manual_stage_override = "C1"
-```
-
-或：
-
-```python
-env_cfg.box_perturbation.manual_stage_override = "C4"
-```
-
-用途：
+注意：`--hold_duration 1.0` 表示中间恒定 hold 的时长，不包括 ramp。总物理外力时长是：
 
 ```text
-C1: 只测 box local x 方向，较小 beta
-C4: 测 x/y/z_world 混合方向，更大 beta 范围
+0.15 + 1.0 + 0.15 = 1.30 s
 ```
 
-### 5. 调大/调小力强度分布
+对应参数：
 
-可以只在 experiment config 里改 stage beta，例如：
-
-```python
-env_cfg.box_perturbation.stages["C1"]["beta"] = {"x": (0.20, 0.30)}
+```bash
+--profile smooth_hold --hold_duration 1.0 --ramp_up 0.15 --ramp_down 0.15
 ```
 
-用途：如果 viewer arrow 太小或物理效果不明显，可以先在 debug experiment 里放大 beta。这个会改变 perturb 分布，只建议用于 debug/evaluation，不要回写 baseline config。
+## 命令 1：Viewer 单条件可视化
 
-### 6. 改 pulse duration
+用途：打开 Isaac Gym viewer，人工检查一个 checkpoint 在一个外力条件下的响应。
 
-在 `apply_debug_config()` 里加入：
+特点：
 
-```python
-env_cfg.box_perturbation.pulse_duration_s = 0.20
+- 只跑一个 trial
+- 不自动 sweep
+- 默认不写 CSV
+- viewer 箭头显示真实瞬时外力
+- 适合人工观察 official / retrained / PI checkpoint 的行为差异
+
+命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+  --task carrybox_perturb \
+  --resume_path legged_gym/resources/ckpt/carrybox.pt \
+  --profile smooth_hold \
+  --direction=-box_y \
+  --beta 0.5 \
+  --hold_duration 1.0 \
+  --seed 1
 ```
 
-用途：让 force pulse 持续更久，更容易在 viewer 和日志里确认。
+什么时候用：
 
-### 7. 只看日志，不画 arrow
+- 想看机器人是否被外力带动、是否保持抓箱、是否摔倒。
+- 想确认 smooth_hold 箭头是否 ramp up、hold、ramp down。
+- 想手动比较不同 checkpoint，但每次仍然只加载一个 checkpoint。
 
-```python
-DEBUG_DRAW_FORCE = False
+## 命令 2：Headless 单条件并保存 CSV
+
+用途：无 viewer 跑一个 trial，并保存 trace CSV 和 summary CSV。
+
+特点：
+
+- 只跑一个 trial
+- 不打开 viewer
+- 保存机器可读结果
+- 适合先验证 CSV 输出和 initial-state signature
+
+命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+  --task carrybox_perturb \
+  --resume_path legged_gym/resources/ckpt/carrybox.pt \
+  --profile smooth_hold \
+  --direction=-box_y \
+  --beta 0.5 \
+  --hold_duration 1.0 \
+  --seed 1 \
+  --headless \
+  --save_csv \
+  --output_dir experiments/carrybox_perturb_debug/results/official_single
 ```
 
-用途：避免 viewer line 干扰，只通过 `[PerturbApplied]` 判断是否真实 apply。
+什么时候用：
 
-### 8. 改 viewer arrow 显示尺度
+- 想快速检查 evaluator 是否能跑通。
+- 想检查 `summary.csv` 和 `traces/T0001.csv` 是否生成。
+- 想验证同一个 seed 重复运行时 initial-state signature 是否一致。
 
-在 `apply_debug_config()` 里加入：
+## 命令 3：Headless 默认 smooth_hold sweep
 
-```python
-env_cfg.box_perturbation.debug_force_draw_scale_m_per_N = 0.20
-env_cfg.box_perturbation.debug_force_arrow_hold_s = 2.0
-```
+用途：对一个 checkpoint 跑默认 force-follow 矩阵。
 
-用途：物理 force 不变，只让 viewer arrow 更长、停留更久。
+特点：
 
-### 9. 改日志频率
+- 一个命令仍然只加载一个 checkpoint
+- 自动生成多个 deterministic trial
+- Trial ID 不包含 checkpoint 名，因此不同 checkpoint 的 `T0001`、`T0002` 可配对比较
+- 默认保存 CSV
 
-```python
-DEBUG_CARRY_GATE_LOG_INTERVAL_POLICY_STEPS = 1
-```
-
-每个 policy step 都打印 carry gate，适合短时精查。日志会很多。
-
-```python
-DEBUG_CARRY_GATE_LOG_INTERVAL_POLICY_STEPS = 20
-```
-
-降低刷屏。
-
-### 10. 改 episode 长度
-
-```python
-DEBUG_EPISODE_LENGTH_S = 30
-```
-
-用途：如果 15 秒内经常还没进入 confirmed carry，可以拉长 episode。
-
-## 可以通过 play_debug.py 改变的测试效果
-
-这些属于运行脚本行为，不属于 env 算法。
-
-### 改 commanded velocity
-
-当前固定：
-
-```python
-DEBUG_COMMAND_X = 0.4
-DEBUG_COMMAND_Y = 0.0
-DEBUG_COMMAND_YAW = 0.0
-```
-
-如果想测试慢走：
-
-```python
-DEBUG_COMMAND_X = 0.3
-```
-
-如果想测试转向或侧向：
-
-```python
-DEBUG_COMMAND_Y = 0.2
-DEBUG_COMMAND_YAW = 0.3
-```
-
-用途：不同 command 可能改变是否稳定 carry、是否更容易丢箱、perturb 后是否恢复。
-
-### 改 rollout 时长倍数
-
-当前：
-
-```python
-for i in range(10 * int(env.max_episode_length)):
-```
-
-这表示最多跑 10 个 episode length 的 step 数。可以改成：
-
-```python
-for i in range(2 * int(env.max_episode_length)):
-```
-
-用于短跑快速看 trigger。
-
-## 不建议在这个 experiment layer 做的事
-
-除非明确要做新的实验，不建议改：
+默认矩阵：
 
 ```text
-Actor observation definition
-privileged observation definition
-critic architecture
-PPO runner / training pipeline
-carry phase 原始判定逻辑
-box perturb force generator 实现
-GLOBAL_SPACE / COM force apply 逻辑
-baseline task registry 的永久注册
+directions: +box_x, -box_x, +box_y, -box_y
+betas:      0.1, 0.3, 0.5, 0.7, 0.9, 1.1
+holds:      0.5, 1.0, 2.0
+seeds:      1, 2, 3
 ```
 
-这个目录的定位是：隔离地改变 config、增加日志、做 actor-only playback evaluation。
-
-## 常见判断路径
-
-### 情况 A：viewer 里看不到 arrow
-
-先看日志：
+总 trial 数：
 
 ```text
-有没有 [PerturbSchedule]
-有没有 [PerturbCommit]
-有没有 [PerturbApplied]
+4 * 6 * 3 * 3 = 216
 ```
 
-如果有 `[PerturbApplied]` 且 `magnitude_N > 0`，说明物理 force 已经 apply。viewer 看不到通常是：
+命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+  --task carrybox_perturb \
+  --resume_path legged_gym/resources/ckpt/carrybox.pt \
+  --profile smooth_hold \
+  --sweep \
+  --headless \
+  --save_csv \
+  --output_dir experiments/carrybox_perturb_debug/results/official
+```
+
+什么时候用：
+
+- 正式跑 official checkpoint 的完整 force-follow 评估。
+- 之后用同一条命令只替换 `--resume_path` 和 `--output_dir`，分别跑 retrained / PI checkpoint。
+
+## 命令 4：Headless 小 sweep 测试
+
+用途：正式大 sweep 之前先跑一个小矩阵，确认 trial 数、CSV、force timing 都正常。
+
+特点：
+
+- 只跑 8 个 trial
+- 适合调试 evaluator
+- 比默认 216 trial 快很多
+
+命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+  --task carrybox_perturb \
+  --resume_path legged_gym/resources/ckpt/carrybox.pt \
+  --profile smooth_hold \
+  --sweep \
+  --directions=+box_x,-box_x \
+  --betas=0.1,0.3 \
+  --seeds=1,2 \
+  --hold_durations=1.0 \
+  --headless \
+  --save_csv \
+  --output_dir experiments/carrybox_perturb_debug/results/smoke_sweep
+```
+
+矩阵大小：
 
 ```text
-arrow scale 太小
-pulse 太短
-headless
-debug_draw_force 没在 make_env 前设置
-viewer camera 没看到 box
+2 directions * 2 betas * 2 seeds * 1 hold = 8 trials
 ```
 
-可以尝试：
+什么时候用：
 
-```python
-env_cfg.box_perturbation.debug_force_draw_scale_m_per_N = 0.20
-env_cfg.box_perturbation.debug_force_arrow_hold_s = 2.0
+- 第一次在 Ubuntu 上验证命令。
+- 修改 evaluator 后做 smoke test。
+- 检查 deterministic Trial ID 是否正确。
+
+## 命令 5：half_sine 短扰动单条件
+
+用途：测试短时扰动恢复，而不是持续 force following。
+
+特点：
+
+- 使用 half-sine pulse
+- `--pulse_duration` 控制整个短脉冲时长
+- 不使用 `--hold_duration`
+
+Viewer 命令：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+  --task carrybox_perturb \
+  --resume_path legged_gym/resources/ckpt/carrybox.pt \
+  --profile half_sine \
+  --direction=+box_x \
+  --beta 0.5 \
+  --pulse_duration 0.10 \
+  --seed 1
 ```
 
-### 情况 B：一直没有 schedule
+Headless CSV 命令：
 
-看 `[CarryGate]`：
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+  --task carrybox_perturb \
+  --resume_path legged_gym/resources/ckpt/carrybox.pt \
+  --profile half_sine \
+  --direction=+box_x \
+  --beta 0.5 \
+  --pulse_duration 0.10 \
+  --seed 1 \
+  --headless \
+  --save_csv \
+  --output_dir experiments/carrybox_perturb_debug/results/half_sine_single
+```
+
+什么时候用：
+
+- 想测局部冲击后的恢复。
+- 想和旧的 half-sine perturbation 行为保持可比。
+
+## 命令 6：三个 checkpoint 的配对评估方式
+
+评估器不会在一个进程里加载三个 policy。你需要分别运行三次。
+
+official：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+  --task carrybox_perturb \
+  --resume_path legged_gym/resources/ckpt/carrybox.pt \
+  --profile smooth_hold \
+  --sweep \
+  --headless \
+  --save_csv \
+  --output_dir experiments/carrybox_perturb_debug/results/official
+```
+
+retrained：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+  --task carrybox_perturb \
+  --resume_path <retrained_checkpoint.pt> \
+  --profile smooth_hold \
+  --sweep \
+  --headless \
+  --save_csv \
+  --output_dir experiments/carrybox_perturb_debug/results/retrained
+```
+
+PI-trained：
+
+```bash
+python3 experiments/carrybox_perturb_debug/evaluate.py \
+  --task carrybox_perturb \
+  --resume_path <pi_checkpoint.pt> \
+  --profile smooth_hold \
+  --sweep \
+  --headless \
+  --save_csv \
+  --output_dir experiments/carrybox_perturb_debug/results/pi
+```
+
+这三次运行的条件矩阵相同，Trial ID 相同，只有 Actor 参数不同。后续比较时按 `trial_id` 配对即可。
+
+## 常用参数说明
+
+`--task carrybox_perturb`
+
+指定 baseline config 来源。当前 evaluator 只支持 `carrybox_perturb`。
+
+`--resume_path <checkpoint.pt>`
+
+指定要加载的 Actor checkpoint。只加载 `actor.*` 和 `std`，Critic 跳过。
+
+`--profile half_sine`
+
+短脉冲扰动，用 `--pulse_duration` 控制持续时间。
+
+`--profile smooth_hold`
+
+持续外力跟随测试，用 `--hold_duration` 控制恒定 hold 时间。
+
+`--direction=+box_x`
+
+box-local 正 x 方向。正方向不一定需要等号，但建议统一使用等号。
+
+`--direction=-box_y`
+
+box-local 负 y 方向。负方向必须使用等号。
+
+`--beta 0.5`
+
+力大小系数，实际峰值力为 `0.5 * m_box * g`。
+
+`--seed 1`
+
+单 trial 使用的随机种子。
+
+`--headless`
+
+不打开 viewer。适合服务器或批量评估。
+
+`--save_csv`
+
+保存 trace CSV 和 summary CSV。
+
+`--sweep`
+
+自动生成条件矩阵。仍然只加载一个 checkpoint。
+
+`--directions=+box_x,-box_x`
+
+自定义 sweep 方向列表。
+
+`--betas=0.1,0.3`
+
+自定义 sweep beta 列表。
+
+`--seeds=1,2`
+
+自定义 sweep seed 列表。
+
+`--hold_durations=0.5,1.0,2.0`
+
+自定义 smooth_hold 的 hold duration 列表。
+
+`--output_dir <dir>`
+
+指定输出目录。
+
+`--verbose`
+
+打开详细 debug 输出，包括 fixed-scene dump、CarryGate、force viewer check 等。默认不要开，避免刷屏。
+
+## 默认终端输出
+
+默认输出保持安静，只显示 trial 状态切换和结果摘要，类似：
 
 ```text
-height_gate=False      -> 箱子没有达到 carry clearance
-static_gate=False      -> box/robot 相对速度或 box 角速度太大
-left_contact=False     -> 左手接触不足
-right_contact=False    -> 右手接触不足
-confirmed=False        -> carry_phase 或 both_contact 没满足
-streak 太小            -> threshold 没到
-decision_made=True     -> 本 episode 已经做过 perturb decision
-event_count>=max       -> 本 episode event 数已达上限
+============================================================
+Trial T0001
+profile=smooth_hold
+direction=-box_y
+beta=0.500
+hold=1.000s
+seed=1
+============================================================
+[STATE]
+WAIT_CARRY -> CONFIRMED_CARRY
+[STATE]
+CONFIRMED_CARRY -> PRE_FORCE
+[FORCE ON]
+direction=-box_y
+world_direction=(...)
+beta=0.500
+box_mass=...
+target_force=...N
+ramp_up=0.150s
+hold=1.000s
+ramp_down=0.150s
+[FORCE OFF]
+duration=...
+impulse=...Ns
+[RESULT]
+physical_failure=no
+contact_loss=...
+box_displacement_along_force=...
+robot_displacement_along_force=...
+max_hand_box_relative_speed=...
+final_confirmed_carry=...
 ```
 
-### 情况 C：schedule/commit 有，但 apply force 为 0
+## CSV 输出
 
-重点看：
+启用 `--save_csv` 后，输出结构为：
 
 ```text
-remaining_steps
-peak_force_N
-direction_world
-[PerturbApplied] phase=start
+<output_dir>/
+  traces/
+    T0001.csv
+    T0002.csv
+    ...
+  summary.csv
 ```
 
-commit 当下 `applied_force_world` 可以是 0，这是正常的，因为 force 在 physics substep 里写入。
+`summary.csv` 至少包含：
 
-## 最小删除恢复原则
+- `trial_id`
+- `checkpoint`
+- `seed`
+- `profile`
+- `direction`
+- `beta`
+- `hold_duration`
+- `pulse_duration`
+- `box_mass`
+- `peak_force_N`
+- `impulse_Ns`
+- `physical_failure`
+- `termination_reason`
+- `contact_loss`
+- `max_hand_box_relative_speed`
+- `box_displacement_along_force`
+- `robot_displacement_along_force`
+- `final_confirmed_carry`
+- `task_success`
+- `object2goal_distance_final`
+- `initial_state_signature_sha1`
+- `initial_state_signature_json`
 
-这个 experiment layer 的目标是可删除。删除：
+`traces/Txxxx.csv` 保存每个物理 substep 的外力、箱体响应、接触、手-箱相对运动和已有 force/contact instrumentation。
 
-```text
-experiments/carrybox_perturb_debug/
+## Viewer 箭头语义
+
+viewer 里的红色箭头表示真实瞬时物理外力：
+
+- 方向等于真实施加的 `force_world`
+- 长度只受可视化比例 `debug_force_draw_scale_m_per_N` 影响
+- 改变箭头比例不会改变物理外力
+- `smooth_hold` 下箭头会自然 ramp up、hold、ramp down
+
+评估 viewer 默认不使用 force 结束后的假箭头 hold。
+
+## 不修改的 baseline 文件
+
+这个 evaluator 隔离在 `experiments/carrybox_perturb_debug/` 下，不需要修改：
+
+- `legged_gym/legged_gym/envs/g1/carrybox.py`
+- `legged_gym/legged_gym/envs/g1/carrybox_PI.py`
+- `legged_gym/legged_gym/envs/g1/carrybox_boxperturb.py`
+- `legged_gym/legged_gym/envs/g1/carrybox_boxperturb_config.py`
+- `legged_gym/legged_gym/envs/g1/carrybox_config.py`
+- `legged_gym/legged_gym/envs/g1/carrybox_config_PI.py`
+- `legged_gym/legged_gym/scripts/play.py`
+- `legged_gym/legged_gym/scripts/play_ActorOnly.py`
+- PPO / Critic / training pipeline
+
+## 最常见错误
+
+### 1. `--direction -box_y` 报错
+
+原因：`-box_y` 以 `-` 开头，被 Bash/argparse 当成 option。
+
+正确写法：
+
+```bash
+--direction=-box_y
 ```
 
-后，debug subclass、debug config、debug player 都会消失。只要没有手动把这里的改动复制回 `legged_gym/legged_gym/envs/__init__.py` 或核心 env 文件，baseline `carrybox_perturb` 行为不会因为这个目录残留而改变。
+### 2. `python3: command not found`
+
+使用你的环境里的 Python：
+
+```bash
+python experiments/carrybox_perturb_debug/evaluate.py ...
+```
+
+或者先激活 Conda 环境。
+
+### 3. `ModuleNotFoundError: isaacgym`
+
+说明当前 Python 环境不是 Isaac Gym 环境。先激活安装了 Isaac Gym 的环境。
+
+### 4. 服务器没有显示器
+
+使用：
+
+```bash
+--headless
+```
+
+如果需要保存结果，同时加：
+
+```bash
+--save_csv --output_dir <dir>
+```
