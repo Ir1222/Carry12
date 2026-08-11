@@ -23,6 +23,9 @@ class LeggedRobot(CarryBoxPerturb):
         self._debug_force_viewer_check_reported = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
+        self._debug_relaxed_carry_streak = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
         self._fixed_scene_previous_snapshot = None
         self._fixed_scene_reset_count = 0
 
@@ -44,6 +47,8 @@ class LeggedRobot(CarryBoxPerturb):
 
     def _reset_env_tensors(self, env_ids):
         super()._reset_env_tensors(env_ids)
+        if hasattr(self, "_debug_relaxed_carry_streak"):
+            self._debug_relaxed_carry_streak[env_ids] = 0
         if self._fixed_scene_enabled():
             self._debug_log_fixed_scene(env_ids)
 
@@ -231,8 +236,149 @@ class LeggedRobot(CarryBoxPerturb):
 
     def _update_box_perturbation_state(self):
         debug = self._debug_collect_gate_state()
-        super()._update_box_perturbation_state()
+        mode = self._debug_trigger_mode()
+        if mode == "confirmed_carry":
+            super()._update_box_perturbation_state()
+        else:
+            self._debug_update_box_perturbation_state(mode, debug)
         self._debug_log_carry_gate(debug)
+
+    def _debug_update_box_perturbation_state(self, mode, debug):
+        cfg = self.cfg.box_perturbation
+        if not bool(cfg.enabled):
+            self._clear_box_perturbation_state_for_gate()
+            self._debug_relaxed_carry_streak.zero_()
+            self.extras["perturb"] = self._build_perturb_log_info()
+            return
+
+        self.confirmed_carry_streak[:] = torch.where(
+            self.confirmed_carry_buf,
+            self.confirmed_carry_streak + 1,
+            torch.zeros_like(self.confirmed_carry_streak),
+        )
+
+        self._update_recovery_state()
+        self._log_applied_force_debug()
+
+        if bool(cfg.evaluation_mode) and bool(cfg.evaluation_manual_schedule):
+            self.extras["perturb"] = self._build_perturb_log_info()
+            return
+
+        if bool(cfg.debug_sweep_enabled):
+            self._update_debug_force_sweep()
+            self.extras["perturb"] = self._build_perturb_log_info()
+            return
+
+        if mode == "time_after_reset":
+            trigger_eligible = self._debug_time_after_reset_eligible()
+            self._debug_schedule_trigger(trigger_eligible, mode, debug)
+        elif mode == "relaxed_carry":
+            trigger_eligible = self._debug_relaxed_carry_eligible(debug)
+            self._debug_schedule_trigger(trigger_eligible, mode, debug)
+        else:
+            raise ValueError(f"Unknown debug_trigger_mode: {mode}")
+
+        self.extras["perturb"] = self._build_perturb_log_info()
+
+    def _debug_time_after_reset_eligible(self):
+        trigger_step = int(
+            getattr(self.cfg.box_perturbation, "debug_trigger_policy_step", 100)
+        )
+        return self.episode_length_buf >= trigger_step
+
+    def _debug_relaxed_carry_eligible(self, debug):
+        gate = self._debug_compute_gate_tensors()
+        cfg = self.cfg.box_perturbation
+        relaxed = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
+        if bool(getattr(cfg, "debug_relaxed_require_height_gate", True)):
+            relaxed &= gate["height_gate"]
+        if bool(getattr(cfg, "debug_relaxed_require_static_gate", False)):
+            relaxed &= gate["static_gate"]
+
+        contact_mode = str(getattr(cfg, "debug_relaxed_contact_mode", "either"))
+        if contact_mode == "both":
+            relaxed &= gate["left_contact"] & gate["right_contact"]
+        elif contact_mode == "either":
+            relaxed &= gate["left_contact"] | gate["right_contact"]
+        elif contact_mode == "none":
+            pass
+        else:
+            raise ValueError(
+                "debug_relaxed_contact_mode must be 'both', 'either', or 'none'; "
+                f"got {contact_mode!r}"
+            )
+
+        self._debug_relaxed_carry_streak[:] = torch.where(
+            relaxed,
+            self._debug_relaxed_carry_streak + 1,
+            torch.zeros_like(self._debug_relaxed_carry_streak),
+        )
+        threshold = int(getattr(cfg, "debug_relaxed_stable_policy_steps", 1))
+        eligible = self._debug_relaxed_carry_streak >= threshold
+        env_id = 0
+        debug["relaxed_available"] = True
+        debug["relaxed_require_height_gate"] = bool(
+            getattr(cfg, "debug_relaxed_require_height_gate", True)
+        )
+        debug["relaxed_require_static_gate"] = bool(
+            getattr(cfg, "debug_relaxed_require_static_gate", False)
+        )
+        debug["relaxed_contact_mode"] = contact_mode
+        debug["relaxed_gate"] = bool(relaxed[env_id].item())
+        debug["relaxed_streak"] = int(self._debug_relaxed_carry_streak[env_id].item())
+        debug["relaxed_threshold"] = threshold
+        debug["relaxed_eligible"] = bool(eligible[env_id].item())
+        return eligible
+
+    def _debug_schedule_trigger(self, trigger_eligible, mode, debug):
+        cfg = self.cfg.box_perturbation
+        eligible = (
+            trigger_eligible
+            & ~self.box_perturb_decision_made_buf
+            & (self.box_perturb_event_count_buf < int(cfg.max_events_per_episode))
+            & (self.box_perturb_remaining_physics_steps == 0)
+        )
+        if not torch.any(eligible):
+            return
+
+        self.box_perturb_decision_made_buf[eligible] = True
+        self._perturb_total_decisions += eligible.float().sum()
+        trigger_ids = torch.nonzero(eligible, as_tuple=False).flatten()
+        self._debug_log_trigger_bypass(mode, debug, trigger_ids)
+        self._schedule_box_perturbation(trigger_ids)
+
+    def _debug_log_trigger_bypass(self, mode, debug, env_ids):
+        if not self._debug_includes_env0(env_ids):
+            return
+
+        lines = [
+            "[DebugTrigger]",
+            f"step={self.common_step_counter}",
+            "env=0",
+            f"mode={mode}",
+            f"episode_policy_step={int(self.episode_length_buf[0].item())}",
+            f"original_carry_phase={debug['carry_phase']}",
+            f"original_confirmed={debug['confirmed']}",
+            f"original_eligible={debug['eligible']}",
+            f"height_gate={debug['height_gate']}",
+            f"static_gate={debug['static_gate']}",
+            f"left_contact={debug['left_contact']}",
+            f"right_contact={debug['right_contact']}",
+        ]
+        if debug.get("relaxed_available", False):
+            lines.extend(
+                [
+                    f"relaxed_require_height_gate={debug['relaxed_require_height_gate']}",
+                    f"relaxed_require_static_gate={debug['relaxed_require_static_gate']}",
+                    f"relaxed_contact_mode={debug['relaxed_contact_mode']}",
+                    f"relaxed_gate={debug['relaxed_gate']}",
+                    f"relaxed_streak={debug['relaxed_streak']}",
+                    f"relaxed_threshold={debug['relaxed_threshold']}",
+                    f"relaxed_eligible={debug['relaxed_eligible']}",
+                ]
+            )
+        print("\n".join(lines))
 
     def _schedule_box_perturbation(self, env_ids):
         if self._debug_includes_env0(env_ids):
@@ -313,8 +459,34 @@ class LeggedRobot(CarryBoxPerturb):
             self._debug_force_pulse_seen[env_id] = False
 
     def _debug_collect_gate_state(self):
-        cfg = getattr(self.cfg, "carry_phase", None)
+        gate = self._debug_compute_gate_tensors()
         env_id = 0
+        perturb_cfg = self.cfg.box_perturbation
+        debug = {
+            "trigger_mode": self._debug_trigger_mode(),
+            "carry_phase": bool(self.carry_phase_buf[env_id].item()),
+            "confirmed": bool(self.confirmed_carry_buf[env_id].item()),
+            "projected_streak": int(gate["projected_streak"][env_id].item()),
+            "clearance": float(gate["clearance"][env_id].item()),
+            "height_gate": bool(gate["height_gate"][env_id].item()),
+            "static_gate": bool(gate["static_gate"][env_id].item()),
+            "left_contact": bool(gate["left_contact"][env_id].item()),
+            "right_contact": bool(gate["right_contact"][env_id].item()),
+            "left_contact_norm_N": float(gate["left_norm"][env_id].item()),
+            "right_contact_norm_N": float(gate["right_norm"][env_id].item()),
+            "rel_lin_vel": float(gate["rel_lin_vel_norm"][env_id].item()),
+            "box_ang_vel": float(gate["box_ang_vel_norm"][env_id].item()),
+            "eligible": bool(gate["eligible"][env_id].item()),
+            "time_trigger_policy_step": int(
+                getattr(perturb_cfg, "debug_trigger_policy_step", 100)
+            ),
+            "episode_policy_step": int(self.episode_length_buf[env_id].item()),
+            "relaxed_available": False,
+        }
+        return debug
+
+    def _debug_compute_gate_tensors(self):
+        cfg = getattr(self.cfg, "carry_phase", None)
         support_height = torch.full_like(
             self.box_states[:, 2],
             float(getattr(cfg, "support_height", 0.0)),
@@ -355,19 +527,17 @@ class LeggedRobot(CarryBoxPerturb):
             & (self.box_perturb_event_count_buf < int(perturb_cfg.max_events_per_episode))
         )
         return {
-            "carry_phase": bool(self.carry_phase_buf[env_id].item()),
-            "confirmed": bool(self.confirmed_carry_buf[env_id].item()),
-            "projected_streak": int(projected_streak[env_id].item()),
-            "clearance": float(clearance[env_id].item()),
-            "height_gate": bool(height_mask[env_id].item()),
-            "static_gate": bool(static_mask[env_id].item()),
-            "left_contact": bool(left_contact[env_id].item()),
-            "right_contact": bool(right_contact[env_id].item()),
-            "left_contact_norm_N": float(left_norm[env_id].item()),
-            "right_contact_norm_N": float(right_norm[env_id].item()),
-            "rel_lin_vel": float(rel_lin_vel_norm[env_id].item()),
-            "box_ang_vel": float(box_ang_vel_norm[env_id].item()),
-            "eligible": bool(eligible[env_id].item()),
+            "clearance": clearance,
+            "height_gate": height_mask,
+            "static_gate": static_mask,
+            "left_contact": left_contact,
+            "right_contact": right_contact,
+            "left_norm": left_norm,
+            "right_norm": right_norm,
+            "rel_lin_vel_norm": rel_lin_vel_norm,
+            "box_ang_vel_norm": box_ang_vel_norm,
+            "projected_streak": projected_streak,
+            "eligible": eligible,
         }
 
     def _debug_log_carry_gate(self, debug):
@@ -384,6 +554,8 @@ class LeggedRobot(CarryBoxPerturb):
             "[CarryGate]\n"
             f"step={self.common_step_counter}\n"
             "env=0\n"
+            f"trigger_mode={debug['trigger_mode']}\n"
+            f"episode_policy_step={debug['episode_policy_step']}\n"
             f"carry_phase={debug['carry_phase']}\n"
             f"confirmed={debug['confirmed']}\n"
             f"streak={int(self.confirmed_carry_streak[0].item())}\n"
@@ -401,7 +573,30 @@ class LeggedRobot(CarryBoxPerturb):
             f"left_contact_norm_N={debug['left_contact_norm_N']:.6f}\n"
             f"right_contact_norm_N={debug['right_contact_norm_N']:.6f}\n"
             f"rel_lin_vel={debug['rel_lin_vel']:.6f}\n"
-            f"box_ang_vel={debug['box_ang_vel']:.6f}"
+            f"box_ang_vel={debug['box_ang_vel']:.6f}\n"
+            f"time_trigger_policy_step={debug['time_trigger_policy_step']}"
+        )
+        if debug.get("relaxed_available", False):
+            print(
+                "[RelaxedCarryGate]\n"
+                f"step={self.common_step_counter}\n"
+                "env=0\n"
+                f"require_height_gate={debug['relaxed_require_height_gate']}\n"
+                f"require_static_gate={debug['relaxed_require_static_gate']}\n"
+                f"contact_mode={debug['relaxed_contact_mode']}\n"
+                f"relaxed_gate={debug['relaxed_gate']}\n"
+                f"relaxed_streak={debug['relaxed_streak']}\n"
+                f"relaxed_threshold={debug['relaxed_threshold']}\n"
+                f"relaxed_eligible_before_decision={debug['relaxed_eligible']}"
+            )
+
+    def _debug_trigger_mode(self):
+        return str(
+            getattr(
+                self.cfg.box_perturbation,
+                "debug_trigger_mode",
+                "confirmed_carry",
+            )
         )
 
     def _debug_log_applied_force(self, phase):

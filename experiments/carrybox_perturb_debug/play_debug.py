@@ -72,10 +72,15 @@ def play(args):
         load_actor_only_for_inference(ppo_runner, args.resume_path, device=env.device)
     policy = ppo_runner.get_inference_policy(device=env.device)
 
+    debug_command = getattr(env.cfg, "debug_command", None)
+    command_x = float(getattr(debug_command, "lin_vel_x", 0.4))
+    command_y = float(getattr(debug_command, "lin_vel_y", 0.0))
+    command_yaw = float(getattr(debug_command, "yaw_rate", 0.0))
+
     for i in range(10 * int(env.max_episode_length)):
-        env.commands[:, 0] = 0.8
-        env.commands[:, 1] = 0.0
-        env.commands[:, 2] = 0.0
+        env.commands[:, 0] = command_x
+        env.commands[:, 1] = command_y
+        env.commands[:, 2] = command_yaw
         env.gym.fetch_results(env.sim, True)
         actions = policy(obs.detach())
         if args.play_dataset:

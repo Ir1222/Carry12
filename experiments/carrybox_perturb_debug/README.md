@@ -53,11 +53,20 @@ python experiments/carrybox_perturb_debug/play_debug.py --task carrybox_perturb_
 
 ```python
 DEBUG_NUM_ENVS = 1
-DEBUG_EPISODE_LENGTH_S = 15
+DEBUG_EPISODE_LENGTH_S = 30
 DEBUG_STABLE_CARRY_STEPS = 5
 DEBUG_FORCE_EVENT = True
 DEBUG_DRAW_FORCE = True
 DEBUG_CARRY_GATE_LOG_INTERVAL_POLICY_STEPS = 5
+DEBUG_TRIGGER_MODE = "confirmed_carry"
+DEBUG_TRIGGER_POLICY_STEP = 100
+DEBUG_RELAXED_REQUIRE_HEIGHT_GATE = True
+DEBUG_RELAXED_REQUIRE_STATIC_GATE = False
+DEBUG_RELAXED_CONTACT_MODE = "either"
+DEBUG_RELAXED_STABLE_STEPS = 1
+DEBUG_COMMAND_X = 0.4
+DEBUG_COMMAND_Y = 0.0
+DEBUG_COMMAND_YAW = 0.0
 ```
 
 `apply_debug_config(env_cfg)` 会在 `task_registry.make_env()` 之前执行。这个时机很重要，因为 `carrybox_boxperturb._init_buffers()` 里会读取：
@@ -84,7 +93,33 @@ box_perturbation.debug_force_event = True
 box_perturbation.debug_draw_force = True
 box_perturbation.stable_confirmed_carry_policy_steps = 5
 box_perturbation.debug_carry_gate_log_interval_policy_steps = 5
+box_perturbation.debug_trigger_mode = "confirmed_carry"
+box_perturbation.debug_trigger_policy_step = 100
+debug_command.lin_vel_x = 0.4
 ```
+
+Debug trigger modes:
+
+```python
+# Default/current semantics: perturb only after confirmed carry.
+DEBUG_TRIGGER_MODE = "confirmed_carry"
+
+# Force-chain diagnostic: schedule once after reset, regardless of carry_phase.
+DEBUG_TRIGGER_MODE = "time_after_reset"
+DEBUG_TRIGGER_POLICY_STEP = 100
+
+# Relaxed gate diagnostic: log original gate and relaxed gate side by side.
+DEBUG_TRIGGER_MODE = "relaxed_carry"
+DEBUG_RELAXED_REQUIRE_HEIGHT_GATE = True
+DEBUG_RELAXED_REQUIRE_STATIC_GATE = False
+DEBUG_RELAXED_CONTACT_MODE = "either"  # "both", "either", or "none"
+DEBUG_RELAXED_STABLE_STEPS = 1
+```
+
+`time_after_reset` and `relaxed_carry` are diagnostics only. They reuse the
+same `_schedule_box_perturbation()` / `_commit_box_perturbation()` / Isaac Gym
+force tensor path, but they are not valid carry robustness metrics unless the
+original `[CarryGate]` also reports real carry.
 
 ## 日志怎么看
 
@@ -407,22 +442,22 @@ DEBUG_EPISODE_LENGTH_S = 30
 当前固定：
 
 ```python
-env.commands[:, 0] = 0.8
-env.commands[:, 1] = 0.0
-env.commands[:, 2] = 0.0
+DEBUG_COMMAND_X = 0.4
+DEBUG_COMMAND_Y = 0.0
+DEBUG_COMMAND_YAW = 0.0
 ```
 
 如果想测试慢走：
 
 ```python
-env.commands[:, 0] = 0.3
+DEBUG_COMMAND_X = 0.3
 ```
 
 如果想测试转向或侧向：
 
 ```python
-env.commands[:, 1] = 0.2
-env.commands[:, 2] = 0.3
+DEBUG_COMMAND_Y = 0.2
+DEBUG_COMMAND_YAW = 0.3
 ```
 
 用途：不同 command 可能改变是否稳定 carry、是否更容易丢箱、perturb 后是否恢复。
