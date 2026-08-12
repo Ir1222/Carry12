@@ -1,0 +1,3 @@
+policy,policy_label,trials,force_scheduled_rate,physical_failure_rate,contact_loss_rate,final_confirmed_carry_rate,median_force_onset_steps,median_peak_rel_speed,median_both_contact_response_rate,median_mean_resistive_force_N
+official,official carrybox.pt,216,0.5046296296296297,0.5,0.44907407407407407,0.1111111111111111,211.0,1.508854866027832,0.8244186046511628,0.15529489465447704
+pi,PI policy,216,0.6712962962962963,0.3333333333333333,0.4351851851851852,0.38425925925925924,443.0,0.9301510453224182,0.9848484848484849,0.019934416807849298
