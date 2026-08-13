@@ -168,11 +168,10 @@ class G1Cfg(LeggedRobotCfg):
             reset_mode = 'hybrid' # 'default', 'random', 'hybrid'
             hybrid_init_prob = 0.8  # prob of random, for hybrid mode
 
-            skill = ["loco", "pickUp", "carryWith", "putDown"]
-            skill_init_prob = [0.8, 0.2, 0.2, 0.0]
+            skill = ["loco", "pickUp", "carryWith"]
+            skill_init_prob = [0.8, 0.2, 0.2]
 
             box_termination = False
-            min_tar_dist = 0.5
             thresh_tag = [0.7, 2.0]
 
             far_pos_offset = 0.2
@@ -234,6 +233,20 @@ class G1Cfg(LeggedRobotCfg):
         push_interval_s = 10
         max_push_vel_xy = 0.1
 
+    class commands(LeggedRobotCfg.commands):
+        curriculum = False
+        resampling_time = 0.0
+        heading_command = False
+        heading_to_ang_vel = False
+        lin_vel_clip = 0.0
+        ang_vel_clip = 0.0
+
+        class ranges:
+            lin_vel_x = [0.4, 0.8]
+            lin_vel_y = [0.0, 0.0]
+            ang_vel_yaw = [0.0, 0.0]
+            heading = [0.0, 0.0]
+
     class rewards( LeggedRobotCfg.rewards ):
         class scales:
             ## regularization rewards
@@ -248,8 +261,7 @@ class G1Cfg(LeggedRobotCfg):
             ## task rewards
             walk_task = 1.0
             carryup_task = 1.0
-            relocation_task = 1.0
-            standup_task = 0.2
+            carry_velocity_task = 1.0
 
         # walk
         robot2object_pos = 0.0
@@ -261,26 +273,14 @@ class G1Cfg(LeggedRobotCfg):
         hand_contact = 0.0
         box_height = 2.0
 
-        # relocation
-        relocation_heading = 0.5
-        relocation_heading_vel = 0.0
-        robot2goal_pos = 0.0
-        robot2goal_vel = 1.0
-        object2goal_pos = 1.0
-        put_box = 1.0
-
-        # standup
-        base_height = 0.0
-        head_height = 0.5
-        stand_still = 1.0
-        hand_free = 0.5
+        # carry velocity tracking
+        carry_lin_vel = 1.0
+        carry_yaw_vel = 0.5
 
         target_speed_loco = 0.85
-        target_speed_carry = 0.85
         thresh_robot2object = 0.7
-        thresh_robot2goal = 0.65
-        thresh_object2goal = 0.05
-        thresh_object2start = 0.5
+        thresh_carryup_height = 0.05
+        thresh_carry_start_displacement = 0.5
         target_box_height = 0.72
 
     class normalization:
@@ -303,7 +303,7 @@ class G1Cfg(LeggedRobotCfg):
             end_effector = 0.05
 
     class dataset:
-        motion_file = "{LEGGED_GYM_ROOT_DIR}/resources/config/carrybox.yaml"
+        motion_file = "{LEGGED_GYM_ROOT_DIR}/resources/config/carrybox_no_relocation.yaml"
         joint_mapping_file = "{LEGGED_GYM_ROOT_DIR}/resources/config/joint_id.txt"
         frame_rate = 60
         min_time = 0.1 # [s]
