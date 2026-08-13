@@ -352,10 +352,11 @@ class G1CfgPPO( LeggedRobotCfgPPO ):
 
         # logging
         save_interval = 500 # check for potential saves every this many iterations
-        run_name = 'carrybox_coef0.25'
-        experiment_name = 'amp_carrybox'
+        run_name = 'stage1_UpAndWalk'
+        # experiment_name = 'amp_carrybox'
+        experiment_name = 'Ampstage1_UpAndWalk'
         logger = 'tensorboard'  # ['tensorboard', 'wandb']
-        wandb_project = 'amp_carrybox'
+        wandb_project = 'AmpCarry_up_walk'
         wandb_entity = 'YOUR_ENTITY_NAME'  # set to your wandb entity name here
         
         # load and resume

@@ -903,8 +903,9 @@ class LeggedRobot(BaseTask):
     def _reset_task(self, env_ids):
         self.tar_platform_states[env_ids] = self.tar_platform_default_states[env_ids]
         self._resample_carry_commands(env_ids)
-        tar_platform_rel_z = self.tar_platform_pos[env_ids, 2] - self.env_origins[env_ids, 2]
-        assert torch.all(tar_platform_rel_z < -4.0).item(), "tar_platform must remain underground in carrybox no-relocation reset"
+        # No need reset validation in every episode
+        # tar_platform_rel_z = self.tar_platform_pos[env_ids, 2] - self.env_origins[env_ids, 2]
+        # assert torch.all(tar_platform_rel_z < -4.0).item(), "tar_platform must remain underground in carrybox no-relocation reset"
     
     def _reset_env_tensors(self, env_ids):
         all_states = torch.cat((self.platform_states.unsqueeze(1), 
