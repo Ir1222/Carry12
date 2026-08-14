@@ -130,7 +130,7 @@ def print_policy_step_trace(
     label,
     step_id,
     env,
-    obs,
+    actor_obs,
     actions,
     dones,
     termination_ids=None,
@@ -138,10 +138,11 @@ def print_policy_step_trace(
 ):
     action_min, action_max = tensor_min_max(actions[env_id])
     torque_min, torque_max = tensor_min_max(env.torques[env_id])
-    finite_obs = bool(torch.isfinite(obs[env_id]).all().item())
+    finite_obs = bool(torch.isfinite(actor_obs[env_id]).all().item())
     finite_action = bool(torch.isfinite(actions[env_id]).all().item())
     finite_torque = bool(torch.isfinite(env.torques[env_id]).all().item())
     reason = termination_reason(env, env_id=env_id, termination_ids=termination_ids)
+    actor_input_command = actor_obs[env_id, -3:]
     print(
         f"[TRACE][{label}] step={step_id} "
         f"root_z={float(env.root_states[env_id, 2].item()):.6f} "
@@ -149,8 +150,9 @@ def print_policy_step_trace(
         f"pitch={float(env.pitch[env_id].item()):.6f} "
         f"base_lin_vel={short_values(env.base_lin_vel[env_id], count=3)} "
         f"base_ang_vel={short_values(env.base_ang_vel[env_id], count=3)} "
-        f"command={short_values(env.commands[env_id, 0:3], count=3)} "
-        f"obs_norm={tensor_norm(obs[env_id]):.9f} "
+        f"env_command={short_values(env.commands[env_id, 0:3], count=3)} "
+        f"actor_input_command={short_values(actor_input_command, count=3)} "
+        f"actor_obs_norm={tensor_norm(actor_obs[env_id]):.9f} "
         f"action_min={action_min:.9f} action_max={action_max:.9f} "
         f"action_norm={tensor_norm(actions[env_id]):.9f} "
         f"torque_min={torque_min:.9f} torque_max={torque_max:.9f} "
@@ -203,4 +205,3 @@ def compare_actor_only_to_full_checkpoint(ppo_runner, checkpoint_path, obs, devi
             "Actor-only and full checkpoint policies disagree on the same observation: "
             f"max_action_diff={max_action_diff}"
         )
-

@@ -394,6 +394,7 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
         env.cfg.clean_perturbation.enabled = True
 
     for step_id in range(int(env.max_episode_length) + post_force_steps + 10):
+        actor_obs = obs
         actions, step_result = _policy_step(env, policy, obs)
         obs, _, _, dones, _, termination_ids, _, _ = step_result
         if eval_args.parity_debug and step_id < int(eval_args.parity_trace_steps):
@@ -401,7 +402,7 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
                 "evaluate",
                 step_id,
                 env,
-                obs,
+                actor_obs,
                 actions,
                 dones,
                 termination_ids=termination_ids,
@@ -633,25 +634,22 @@ def run_play_equivalent_baseline(eval_args, legged_args):
         print_actor_history("play_baseline_after_runner_reset", env, obs)
 
     max_steps = 10 * int(env.max_episode_length)
-    if eval_args.parity_debug:
-        max_steps = min(max_steps, int(eval_args.parity_trace_steps))
     for step_id in range(max_steps):
         _set_play_baseline_command(env)
         env.gym.fetch_results(env.sim, True)
+        actor_obs = obs
         actions = _policy_action(policy, obs)
         obs, _, _, dones, _, termination_ids, _, _ = env.step(actions.detach())
-        if eval_args.parity_debug:
+        if eval_args.parity_debug and step_id < int(eval_args.parity_trace_steps):
             print_policy_step_trace(
                 "play_baseline",
                 step_id,
                 env,
-                obs,
+                actor_obs,
                 actions,
                 dones,
                 termination_ids=termination_ids,
             )
-        if bool(dones[0].item()) and eval_args.parity_debug:
-            break
     return obs
 
 
