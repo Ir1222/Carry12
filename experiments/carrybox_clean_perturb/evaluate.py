@@ -29,6 +29,7 @@ from evaluation.force_profiles import (  # noqa: E402
     DEFAULT_PULSE_DURATION_S,
     DEFAULT_RAMP_DOWN_S,
     DEFAULT_RAMP_UP_S,
+    DEFAULT_SEEDS,
     VALID_DIRECTIONS,
     VALID_PROFILES,
 )
