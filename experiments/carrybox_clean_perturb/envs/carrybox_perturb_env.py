@@ -598,7 +598,6 @@ class LeggedRobot(CarryBoxBase):
         return (
             bool(self.cfg.clean_perturbation.evaluation_trace_enabled)
             and self.clean_eval_trace_enabled
-            and self.num_envs == 1
         )
 
     def _record_trace_row(self, physics_substep):

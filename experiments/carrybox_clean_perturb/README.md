@@ -70,6 +70,9 @@ evaluation subclass but preserves the known-good play.py reset/config surface:
 unchanged, `reset_mode = default`, and play.py-style command injection
 `vx = 0.8` immediately before each policy call. It reuses the runner-reset
 observation for the single nominal trial instead of adding an extra trial reset.
+Single perturbation trials use the same nominal parity surface before the force
+event is scheduled, so the perturbation evaluator does not fail before
+confirmed carry.
 
 Play-equivalent parity baseline from inside this experiment:
 
@@ -145,16 +148,19 @@ python experiments/carrybox_clean_perturb/evaluate.py \
   --save_csv
 ```
 
-The command is fixed for this experiment:
+For single-trial nominal parity runs, the command is injected like play.py:
 
 ```text
-vx = 0.6 m/s
+vx = 0.8 m/s
 vy = 0.0 m/s
 yaw_rate = 0.0 rad/s
 ```
 
-This is the midpoint of the current Stage-1 training distribution:
+This is inside the current Stage-1 training distribution:
 `vx in [0.4, 0.8]`, `vy = 0`, `yaw = 0`.
+
+Sweep mode keeps the independent evaluator trial setup for batch experiments:
+`num_envs = 1`, `episode_length_s = 30`, and fixed command `vx = 0.6`.
 
 ## Confirmed Carry
 

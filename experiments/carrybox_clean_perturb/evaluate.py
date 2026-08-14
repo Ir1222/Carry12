@@ -544,14 +544,14 @@ def play(eval_args, legged_args):
     if eval_args.parity_mode == "play_baseline":
         return run_play_equivalent_baseline(eval_args, legged_args)
 
-    no_force_nominal_parity = bool(eval_args.no_force and not eval_args.sweep)
+    single_run_nominal_parity = bool(not eval_args.sweep)
     _register_clean_source_task()
     env_cfg, train_cfg = task_registry.get_cfgs(name=CLEAN_SOURCE_TASK)
     env_cfg = apply_evaluation_config(
         env_cfg,
         verbose=eval_args.verbose,
         trace_enabled=eval_args.save_csv,
-        play_nominal_parity=no_force_nominal_parity,
+        play_nominal_parity=single_run_nominal_parity,
     )
     if eval_args.no_force:
         env_cfg.clean_perturbation.enabled = False
@@ -566,14 +566,14 @@ def play(eval_args, legged_args):
     env, _ = task_registry.make_env(name=EVAL_TASK, args=legged_args, env_cfg=env_cfg)
     print("[CONFIG] clean CarryBox source registered through task_registry")
     print("[CONFIG] evaluator env inherits directly from clean carrybox.LeggedRobot")
-    print(f"[CONFIG] fixed command={FIXED_COMMAND}")
-    if no_force_nominal_parity:
+    if single_run_nominal_parity:
         print(
-            "[CONFIG] --no_force nominal parity: play.py-style command "
+            "[CONFIG] single-run nominal parity: play.py-style command "
             f"{PLAY_NOMINAL_COMMAND}, num_envs={env_cfg.env.num_envs}, "
             "episode_length_s=10, box random_size/random_density preserved."
         )
     else:
+        print(f"[CONFIG] fixed command={FIXED_COMMAND}")
         print(
             "[CONFIG] Stage-1 training command range was "
             "vx in [0.4,0.8], vy=0, yaw=0; evaluator uses vx=0.6."
@@ -606,7 +606,7 @@ def play(eval_args, legged_args):
 
     obs = None
     for condition in trials:
-        initial_obs = env.get_observations() if no_force_nominal_parity else None
+        initial_obs = env.get_observations() if single_run_nominal_parity else None
         obs, trace_rows, summary = run_trial(
             env,
             policy,
