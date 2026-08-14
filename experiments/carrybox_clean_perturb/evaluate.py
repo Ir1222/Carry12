@@ -17,7 +17,11 @@ for path in (
 import isaacgym  # noqa: F401,E402
 import torch  # noqa: E402
 
-from configs.evaluation_config import FIXED_COMMAND, apply_evaluation_config  # noqa: E402
+from configs.evaluation_config import (  # noqa: E402
+    FIXED_COMMAND,
+    PLAY_NOMINAL_COMMAND,
+    apply_evaluation_config,
+)
 from envs.carrybox_perturb_env import LeggedRobot as CarryBoxCleanPerturbEnv  # noqa: E402
 from evaluation.force_profiles import (  # noqa: E402
     DEFAULT_BETAS,
@@ -53,7 +57,7 @@ CLEAN_SOURCE_TASK = "carrybox_clean_source"
 EVAL_TASK = "carrybox_clean_perturb_eval"
 EXPECTED_ACTOR_INPUT_DIM = 738
 EXPECTED_TASK_OBS_DIM = 15
-PLAY_BASELINE_COMMAND = (0.8, 0.0, 0.0)
+PLAY_BASELINE_COMMAND = PLAY_NOMINAL_COMMAND
 
 
 def _parse_float_list(text):
@@ -290,7 +294,7 @@ def _current_task_obs(env, obs):
     return obs[0, -int(env.num_task_obs):]
 
 
-def assert_startup_compatibility(env, obs):
+def assert_startup_compatibility(env, obs, expected_command=FIXED_COMMAND):
     if int(env.num_task_obs) != EXPECTED_TASK_OBS_DIM:
         raise AssertionError(f"Expected task obs dim 15, got {env.num_task_obs}")
     if int(env.actor_obs_length) != EXPECTED_ACTOR_INPUT_DIM:
@@ -303,12 +307,13 @@ def assert_startup_compatibility(env, obs):
     if task_obs.numel() != EXPECTED_TASK_OBS_DIM:
         raise AssertionError(f"Expected current task obs length 15, got {task_obs.numel()}")
     command = task_obs[-3:]
-    expected = torch.tensor(FIXED_COMMAND, dtype=command.dtype, device=command.device)
-    if not torch.allclose(command, expected, atol=1.0e-6, rtol=0.0):
-        raise AssertionError(
-            "Current task observation command mismatch: "
-            f"expected={FIXED_COMMAND}, got={command.detach().cpu().tolist()}"
-        )
+    if expected_command is not None:
+        expected = torch.tensor(expected_command, dtype=command.dtype, device=command.device)
+        if not torch.allclose(command, expected, atol=1.0e-6, rtol=0.0):
+            raise AssertionError(
+                "Current task observation command mismatch: "
+                f"expected={expected_command}, got={command.detach().cpu().tolist()}"
+            )
     forbidden_goal_attrs = (
         "goal_pos",
         "goal_rot",
@@ -348,10 +353,17 @@ def quat_rotate_for_eval(env, local, env_id):
     return quat_rotate(env.box_states[env_id, 3:7].unsqueeze(0), local)[0]
 
 
-def run_trial(env, policy, condition, checkpoint, eval_args):
+def run_trial(env, policy, condition, checkpoint, eval_args, initial_obs=None):
     _print_trial_header(condition, eval_args.no_force)
-    obs = _reset_for_trial(env, condition.seed, parity_debug=eval_args.parity_debug)
-    assert_startup_compatibility(env, obs)
+    use_runner_reset_obs = initial_obs is not None
+    if use_runner_reset_obs:
+        obs = initial_obs
+        if eval_args.parity_debug:
+            print("[PARITY][evaluate] using runner-reset observation; no trial reset")
+    else:
+        obs = _reset_for_trial(env, condition.seed, parity_debug=eval_args.parity_debug)
+    expected_command = None if use_runner_reset_obs else FIXED_COMMAND
+    assert_startup_compatibility(env, obs, expected_command=expected_command)
     if eval_args.parity_debug:
         print_initial_state("evaluate_after_trial_reset", env, obs)
 
@@ -393,7 +405,14 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
     else:
         env.cfg.clean_perturbation.enabled = True
 
-    for step_id in range(int(env.max_episode_length) + post_force_steps + 10):
+    rollout_steps = int(env.max_episode_length) + post_force_steps + 10
+    if use_runner_reset_obs:
+        rollout_steps = 10 * int(env.max_episode_length)
+
+    for step_id in range(rollout_steps):
+        if use_runner_reset_obs:
+            _set_play_baseline_command(env)
+            env.gym.fetch_results(env.sim, True)
         actor_obs = obs
         actions, step_result = _policy_step(env, policy, obs)
         obs, _, _, dones, _, termination_ids, _, _ = step_result
@@ -409,10 +428,12 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
             )
         done = bool(dones[0].item())
         if done:
-            failure["physical_failure"] = True
             reason = env.clean_eval_last_termination_reason[0]
             if not reason and termination_ids.numel() > 0:
                 reason = "termination"
+            if use_runner_reset_obs and reason == "timeout":
+                continue
+            failure["physical_failure"] = True
             failure["termination_reason"] = reason or "done"
             break
 
@@ -523,12 +544,14 @@ def play(eval_args, legged_args):
     if eval_args.parity_mode == "play_baseline":
         return run_play_equivalent_baseline(eval_args, legged_args)
 
+    no_force_nominal_parity = bool(eval_args.no_force and not eval_args.sweep)
     _register_clean_source_task()
     env_cfg, train_cfg = task_registry.get_cfgs(name=CLEAN_SOURCE_TASK)
     env_cfg = apply_evaluation_config(
         env_cfg,
         verbose=eval_args.verbose,
         trace_enabled=eval_args.save_csv,
+        play_nominal_parity=no_force_nominal_parity,
     )
     if eval_args.no_force:
         env_cfg.clean_perturbation.enabled = False
@@ -536,7 +559,7 @@ def play(eval_args, legged_args):
 
     train_cfg.runner.resume = False
     legged_args.resume = False
-    legged_args.num_envs = 1
+    legged_args.num_envs = env_cfg.env.num_envs
     legged_args.task = EVAL_TASK
 
     _register_eval_task(env_cfg, train_cfg)
@@ -544,10 +567,17 @@ def play(eval_args, legged_args):
     print("[CONFIG] clean CarryBox source registered through task_registry")
     print("[CONFIG] evaluator env inherits directly from clean carrybox.LeggedRobot")
     print(f"[CONFIG] fixed command={FIXED_COMMAND}")
-    print(
-        "[CONFIG] Stage-1 training command range was "
-        "vx in [0.4,0.8], vy=0, yaw=0; evaluator uses vx=0.6."
-    )
+    if no_force_nominal_parity:
+        print(
+            "[CONFIG] --no_force nominal parity: play.py-style command "
+            f"{PLAY_NOMINAL_COMMAND}, num_envs={env_cfg.env.num_envs}, "
+            "episode_length_s=10, box random_size/random_density preserved."
+        )
+    else:
+        print(
+            "[CONFIG] Stage-1 training command range was "
+            "vx in [0.4,0.8], vy=0, yaw=0; evaluator uses vx=0.6."
+        )
 
     ppo_runner, train_cfg = task_registry.make_alg_runner(
         env=env,
@@ -576,8 +606,14 @@ def play(eval_args, legged_args):
 
     obs = None
     for condition in trials:
+        initial_obs = env.get_observations() if no_force_nominal_parity else None
         obs, trace_rows, summary = run_trial(
-            env, policy, condition, legged_args.resume_path, eval_args
+            env,
+            policy,
+            condition,
+            legged_args.resume_path,
+            eval_args,
+            initial_obs=initial_obs,
         )
         if logger is not None:
             logger.write_trace(condition.trial_id, trace_rows)

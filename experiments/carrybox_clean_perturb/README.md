@@ -64,6 +64,13 @@ python experiments/carrybox_clean_perturb/evaluate.py \
   --no_force
 ```
 
+`--no_force` is intentionally a play-parity nominal regression. It uses the
+evaluation subclass but preserves the known-good play.py reset/config surface:
+`num_envs <= 10`, `episode_length_s = 10`, box `random_size/random_density`
+unchanged, `reset_mode = default`, and play.py-style command injection
+`vx = 0.8` immediately before each policy call. It reuses the runner-reset
+observation for the single nominal trial instead of adding an extra trial reset.
+
 Play-equivalent parity baseline from inside this experiment:
 
 ```bash
