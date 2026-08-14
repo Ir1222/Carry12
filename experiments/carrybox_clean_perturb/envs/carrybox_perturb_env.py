@@ -201,9 +201,41 @@ class LeggedRobot(CarryBoxBase):
             amp_obs_buf,
         )
 
+    def reset_evaluation_trial_state(self, env_ids=None, clear_actor_history=True):
+        """Clear evaluator-only state before an independent evaluation reset."""
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+        elif not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.tensor(env_ids, dtype=torch.long, device=self.device)
+        else:
+            env_ids = env_ids.to(device=self.device, dtype=torch.long)
+        if len(env_ids) == 0:
+            return
+
+        if clear_actor_history:
+            self.obs_buf[env_ids] = 0.0
+            if self.privileged_obs_buf is not None:
+                self.privileged_obs_buf[env_ids] = 0.0
+            if hasattr(self, "amp_obs_buf"):
+                self.amp_obs_buf[env_ids] = 0.0
+
+        if hasattr(self, "clean_eval_event_count_buf"):
+            self._reset_clean_eval_buffers(env_ids)
+            for env_id_tensor in env_ids:
+                env_id = int(env_id_tensor.item())
+                self.clean_eval_last_termination_reason[env_id] = ""
+                self.clean_eval_has_terminal_snapshot[env_id] = False
+                self.clean_eval_terminal_peak_force_N[env_id] = 0.0
+                self.clean_eval_terminal_impulse_Ns[env_id] = 0.0
+                self.clean_eval_terminal_force_duration_s[env_id] = 0.0
+                self.clean_eval_terminal_recovery_success_buf[env_id] = False
+                self.clean_eval_terminal_recovery_time_s[env_id] = float("nan")
+                self.clean_eval_terminal_confirmed_carry_buf[env_id] = False
+
     def _apply_box_external_force(self):
         cfg = self.cfg.clean_perturbation
         if not bool(cfg.enabled):
+            self._assert_no_force_inactive()
             return
 
         self.clean_eval_force_tensor.zero_()
@@ -234,6 +266,27 @@ class LeggedRobot(CarryBoxBase):
             )
             self.clean_eval_elapsed_physics_steps[active] += 1
             self.clean_eval_remaining_physics_steps[active] -= 1
+
+    def _assert_no_force_inactive(self):
+        if not hasattr(self, "clean_eval_force_tensor"):
+            return
+        force_norm = float(torch.linalg.vector_norm(self.clean_eval_force_tensor).item())
+        actual_scale_norm = float(
+            torch.linalg.vector_norm(self.clean_eval_actual_force_scale.float()).item()
+        )
+        remaining_steps = int(torch.sum(self.clean_eval_remaining_physics_steps).item())
+        event_count = int(torch.sum(self.clean_eval_event_count_buf).item())
+        if (
+            force_norm != 0.0
+            or actual_scale_norm != 0.0
+            or remaining_steps != 0
+            or event_count != 0
+        ):
+            raise AssertionError(
+                "--no_force requires all clean perturbation force state to be zero: "
+                f"force_norm={force_norm}, actual_scale_norm={actual_scale_norm}, "
+                f"remaining_steps={remaining_steps}, event_count={event_count}"
+            )
 
     def _profile_scale(self, env_id):
         elapsed_s = (

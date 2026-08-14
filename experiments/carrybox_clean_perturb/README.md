@@ -64,6 +64,30 @@ python experiments/carrybox_clean_perturb/evaluate.py \
   --no_force
 ```
 
+Play-equivalent parity baseline from inside this experiment:
+
+```bash
+python experiments/carrybox_clean_perturb/evaluate.py \
+  --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt \
+  --parity_mode play_baseline \
+  --parity_debug
+```
+
+No-force evaluator with actor-history, initial-state, first-20-step, and
+checkpoint-loader parity diagnostics:
+
+```bash
+python experiments/carrybox_clean_perturb/evaluate.py \
+  --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt \
+  --no_force \
+  --parity_debug \
+  --checkpoint_parity
+```
+
+For independent evaluator trials, the experiment now clears evaluator state,
+actor observation history, and AMP observation history before calling the
+controlled trial reset. The clean training task and policy code are unchanged.
+
 Pulse:
 
 ```bash

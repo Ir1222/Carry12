@@ -35,6 +35,12 @@ from evaluation.force_profiles import (  # noqa: E402
 )
 from evaluation.logger import EvaluationCsvLogger  # noqa: E402
 from evaluation.metrics import sample_policy_metrics, summarize_trial  # noqa: E402
+from evaluation.parity_diagnostics import (  # noqa: E402
+    compare_actor_only_to_full_checkpoint,
+    print_actor_history,
+    print_initial_state,
+    print_policy_step_trace,
+)
 from evaluation.trial import generate_sweep, make_single_trial  # noqa: E402
 from legged_gym import LEGGED_GYM_ROOT_DIR  # noqa: E402
 from legged_gym.envs.g1.carrybox import LeggedRobot as CarryBoxBase  # noqa: E402
@@ -47,6 +53,7 @@ CLEAN_SOURCE_TASK = "carrybox_clean_source"
 EVAL_TASK = "carrybox_clean_perturb_eval"
 EXPECTED_ACTOR_INPUT_DIM = 738
 EXPECTED_TASK_OBS_DIM = 15
+PLAY_BASELINE_COMMAND = (0.8, 0.0, 0.0)
 
 
 def _parse_float_list(text):
@@ -81,6 +88,30 @@ def parse_evaluator_args():
     parser.add_argument("--no_force", action="store_true", default=False)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--verbose", action="store_true", default=False)
+    parser.add_argument(
+        "--parity_mode",
+        choices=("off", "play_baseline"),
+        default="off",
+        help="Run a diagnostic mode instead of the perturbation evaluator.",
+    )
+    parser.add_argument(
+        "--parity_debug",
+        action="store_true",
+        default=False,
+        help="Print actor-history, initial-state, and first-step parity diagnostics.",
+    )
+    parser.add_argument(
+        "--parity_trace_steps",
+        type=int,
+        default=20,
+        help="Number of policy steps to print when --parity_debug is enabled.",
+    )
+    parser.add_argument(
+        "--checkpoint_parity",
+        action="store_true",
+        default=False,
+        help="Compare actor-only loading against full checkpoint loading on one obs.",
+    )
     parser.add_argument("--directions", type=_parse_str_list, default=DEFAULT_DIRECTIONS)
     parser.add_argument("--betas", type=_parse_float_list, default=DEFAULT_BETAS)
     parser.add_argument("--seeds", type=_parse_int_list, default=DEFAULT_SEEDS)
@@ -163,6 +194,7 @@ def load_actor_only_for_inference(ppo_runner, checkpoint_path, device):
         "[ASSERT] checkpoint Actor loads successfully "
         f"(actor_input_dim={actor_input_dim}, current_actor_input_dim={current_actor_input_dim})"
     )
+    return checkpoint_path
 
 
 def _register_clean_source_task():
@@ -227,16 +259,24 @@ def _print_trial_header(condition, no_force):
     print("=" * 60)
 
 
-def _policy_step(env, policy, obs):
+def _policy_action(policy, obs):
     with torch.no_grad():
-        actions = policy(obs.detach())
-    return env.step(actions.detach())
+        return policy(obs.detach())
 
 
-def _reset_for_trial(env, seed):
+def _policy_step(env, policy, obs):
+    actions = _policy_action(policy, obs)
+    return actions, env.step(actions.detach())
+
+
+def _reset_for_trial(env, seed, parity_debug=False):
     set_seed(int(seed))
     if env.clean_eval_trace_enabled:
         env.end_trace()
+    if parity_debug:
+        print_actor_history("evaluate_before_trial_history_clear", env, env.get_observations())
+    if hasattr(env, "reset_evaluation_trial_state"):
+        env.reset_evaluation_trial_state(clear_actor_history=True)
     obs, _ = env.reset()
     env.clear_summary_snapshot(env_id=0)
     return obs
@@ -310,8 +350,10 @@ def quat_rotate_for_eval(env, local, env_id):
 
 def run_trial(env, policy, condition, checkpoint, eval_args):
     _print_trial_header(condition, eval_args.no_force)
-    obs = _reset_for_trial(env, condition.seed)
+    obs = _reset_for_trial(env, condition.seed, parity_debug=eval_args.parity_debug)
     assert_startup_compatibility(env, obs)
+    if eval_args.parity_debug:
+        print_initial_state("evaluate_after_trial_reset", env, obs)
 
     signature = env.evaluation_initial_state_signature(env_id=0)
     if eval_args.save_csv:
@@ -351,8 +393,19 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
     else:
         env.cfg.clean_perturbation.enabled = True
 
-    for _ in range(int(env.max_episode_length) + post_force_steps + 10):
-        obs, _, _, dones, _, termination_ids, _, _ = _policy_step(env, policy, obs)
+    for step_id in range(int(env.max_episode_length) + post_force_steps + 10):
+        actions, step_result = _policy_step(env, policy, obs)
+        obs, _, _, dones, _, termination_ids, _, _ = step_result
+        if eval_args.parity_debug and step_id < int(eval_args.parity_trace_steps):
+            print_policy_step_trace(
+                "evaluate",
+                step_id,
+                env,
+                obs,
+                actions,
+                dones,
+                termination_ids=termination_ids,
+            )
         done = bool(dones[0].item())
         if done:
             failure["physical_failure"] = True
@@ -466,6 +519,9 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
 
 
 def play(eval_args, legged_args):
+    if eval_args.parity_mode == "play_baseline":
+        return run_play_equivalent_baseline(eval_args, legged_args)
+
     _register_clean_source_task()
     env_cfg, train_cfg = task_registry.get_cfgs(name=CLEAN_SOURCE_TASK)
     env_cfg = apply_evaluation_config(
@@ -499,8 +555,16 @@ def play(eval_args, legged_args):
         train_cfg=train_cfg,
         log_root=None,
     )
-    load_actor_only_for_inference(ppo_runner, legged_args.resume_path, device=env.device)
+    if eval_args.parity_debug:
+        print_initial_state("evaluate_after_runner_reset", env, env.get_observations())
+    checkpoint_path = load_actor_only_for_inference(
+        ppo_runner, legged_args.resume_path, device=env.device
+    )
     policy = ppo_runner.get_inference_policy(device=env.device)
+    if eval_args.checkpoint_parity:
+        compare_actor_only_to_full_checkpoint(
+            ppo_runner, checkpoint_path, env.get_observations(), env.device
+        )
 
     trials = _make_trials(eval_args, legged_args)
     logger = None
@@ -517,6 +581,77 @@ def play(eval_args, legged_args):
         if logger is not None:
             logger.write_trace(condition.trial_id, trace_rows)
             logger.append_summary(summary)
+    return obs
+
+
+def _apply_play_overrides(env_cfg, train_cfg):
+    env_cfg.env.num_envs = min(env_cfg.env.num_envs, 10)
+    env_cfg.env.test = True
+    env_cfg.domain_rand.disturbance = False
+    env_cfg.domain_rand.delay = False
+    env_cfg.domain_rand.push_robots = False
+    env_cfg.asset.box.random_props = False
+    env_cfg.asset.box.reset_mode = "default"
+    env_cfg.env.episode_length_s = 10
+    train_cfg.runner.resume = True
+    return env_cfg, train_cfg
+
+
+def _set_play_baseline_command(env):
+    env.commands[:, 0] = PLAY_BASELINE_COMMAND[0]
+    env.commands[:, 1] = PLAY_BASELINE_COMMAND[1]
+    env.commands[:, 2] = PLAY_BASELINE_COMMAND[2]
+
+
+def run_play_equivalent_baseline(eval_args, legged_args):
+    _register_clean_source_task()
+    legged_args.task = CLEAN_SOURCE_TASK
+    env_cfg, train_cfg = task_registry.get_cfgs(name=CLEAN_SOURCE_TASK)
+    env_cfg, train_cfg = _apply_play_overrides(env_cfg, train_cfg)
+    env, _ = task_registry.make_env(
+        name=CLEAN_SOURCE_TASK,
+        args=legged_args,
+        env_cfg=env_cfg,
+    )
+    obs = env.get_observations()
+    print("[PARITY][play_baseline] clean CarryBoxBase env")
+    print("[PARITY][play_baseline] full task_registry checkpoint loading")
+    print(f"[PARITY][play_baseline] command={PLAY_BASELINE_COMMAND}")
+
+    ppo_runner, train_cfg = task_registry.make_alg_runner(
+        env=env,
+        name=CLEAN_SOURCE_TASK,
+        args=legged_args,
+        train_cfg=train_cfg,
+    )
+    policy = ppo_runner.get_inference_policy(device=env.device)
+    obs = env.get_observations()
+
+    if eval_args.parity_debug:
+        print_initial_state("play_baseline_after_runner_reset", env, obs)
+    else:
+        print_actor_history("play_baseline_after_runner_reset", env, obs)
+
+    max_steps = 10 * int(env.max_episode_length)
+    if eval_args.parity_debug:
+        max_steps = min(max_steps, int(eval_args.parity_trace_steps))
+    for step_id in range(max_steps):
+        _set_play_baseline_command(env)
+        env.gym.fetch_results(env.sim, True)
+        actions = _policy_action(policy, obs)
+        obs, _, _, dones, _, termination_ids, _, _ = env.step(actions.detach())
+        if eval_args.parity_debug:
+            print_policy_step_trace(
+                "play_baseline",
+                step_id,
+                env,
+                obs,
+                actions,
+                dones,
+                termination_ids=termination_ids,
+            )
+        if bool(dones[0].item()) and eval_args.parity_debug:
+            break
     return obs
 
 
