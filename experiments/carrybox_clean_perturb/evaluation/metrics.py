@@ -5,6 +5,16 @@ import math
 import torch
 
 
+def _yaw_scalar(env, env_id):
+    if not hasattr(env, "yaw"):
+        return float("nan")
+    return float(env.yaw[env_id].reshape(-1)[0].item())
+
+
+def _wrap_angle(value):
+    return math.atan2(math.sin(float(value)), math.cos(float(value)))
+
+
 def sample_policy_metrics(env, direction_world, force_start, phase, env_id=0):
     direction = direction_world
     box_delta = env.box_states[env_id, 0:3] - force_start["box_pos"]
@@ -21,11 +31,29 @@ def sample_policy_metrics(env, direction_world, force_start, phase, env_id=0):
     right_rel = torch.linalg.vector_norm(
         env.rigid_body_states[env_id, right_index, 7:10] - box_vel
     )
+    yaw = _yaw_scalar(env, env_id)
+    start_yaw = force_start.get("robot_yaw", yaw)
+    forward_xy = torch.tensor(
+        [math.cos(float(start_yaw)), math.sin(float(start_yaw))],
+        dtype=robot_delta.dtype,
+        device=robot_delta.device,
+    )
+    left_xy = torch.tensor(
+        [-math.sin(float(start_yaw)), math.cos(float(start_yaw))],
+        dtype=robot_delta.dtype,
+        device=robot_delta.device,
+    )
 
     return {
         "phase": phase,
         "box_displacement_along_force": float(torch.dot(box_delta, direction).item()),
         "robot_displacement_along_force": float(torch.dot(robot_delta, direction).item()),
+        "robot_forward_displacement_from_start": float(
+            torch.dot(robot_delta[0:2], forward_xy).item()
+        ),
+        "robot_lateral_displacement_from_start": float(
+            torch.dot(robot_delta[0:2], left_xy).item()
+        ),
         "box_velocity_along_force": float(torch.dot(box_vel, direction).item()),
         "robot_velocity_along_force": float(torch.dot(robot_vel, direction).item()),
         "left_hand_contact_proxy": int(env.left_hand_contact_proxy[env_id].item()),
@@ -43,6 +71,12 @@ def sample_policy_metrics(env, direction_world, force_start, phase, env_id=0):
         "yaw_rate_tracking_error": float(
             abs(env.commands[env_id, 2] - env.base_ang_vel[env_id, 2]).item()
         ),
+        "command_vx": float(env.commands[env_id, 0].item()),
+        "command_vy": float(env.commands[env_id, 1].item()),
+        "command_yaw_rate": float(env.commands[env_id, 2].item()),
+        "base_yaw_rad": yaw,
+        "base_yaw_delta_from_start_rad": _wrap_angle(yaw - float(start_yaw)),
+        "base_yaw_rate_body_rad_s": float(env.base_ang_vel[env_id, 2].item()),
     }
 
 
@@ -62,8 +96,18 @@ def summarize_trial(condition, checkpoint, signature, samples, env, failure):
     force_samples = [row for row in samples if row.get("phase") == "force"]
     post_samples = [row for row in samples if row.get("phase") == "post_force"]
     nominal_samples = [
-        row for row in samples if row.get("phase") in ("wait_carry", "pre_force")
+        row
+        for row in samples
+        if row.get("phase")
+        in ("wait_carry", "pre_force", "confirmed_carry", "nominal_locomotion")
     ]
+    yaw_drift_samples = [
+        row
+        for row in samples
+        if row.get("phase") in ("nominal_locomotion", "confirmed_carry", "pre_force")
+    ]
+    if not yaw_drift_samples:
+        yaw_drift_samples = nominal_samples
     contact_loss = any(
         row.get("left_hand_contact_proxy", 0) == 0
         or row.get("right_hand_contact_proxy", 0) == 0
@@ -114,6 +158,12 @@ def summarize_trial(condition, checkpoint, signature, samples, env, failure):
         "robot_displacement_along_force": final_sample.get(
             "robot_displacement_along_force", float("nan")
         ),
+        "robot_forward_displacement_from_start": final_sample.get(
+            "robot_forward_displacement_from_start", float("nan")
+        ),
+        "robot_lateral_displacement_from_start": final_sample.get(
+            "robot_lateral_displacement_from_start", float("nan")
+        ),
         "box_velocity_along_force": final_sample.get(
             "box_velocity_along_force", float("nan")
         ),
@@ -131,6 +181,27 @@ def summarize_trial(condition, checkpoint, signature, samples, env, failure):
         ),
         "yaw_rate_tracking_error_nominal_mean": _mean(
             row["yaw_rate_tracking_error"] for row in nominal_samples
+        ),
+        "command_vx": final_sample.get("command_vx", float("nan")),
+        "command_vy": final_sample.get("command_vy", float("nan")),
+        "command_yaw_rate": final_sample.get("command_yaw_rate", float("nan")),
+        "final_base_yaw_rad": final_sample.get("base_yaw_rad", float("nan")),
+        "final_base_yaw_delta_from_start_rad": final_sample.get(
+            "base_yaw_delta_from_start_rad", float("nan")
+        ),
+        "base_yaw_rate_body_nominal_mean": _mean(
+            row["base_yaw_rate_body_rad_s"] for row in yaw_drift_samples
+        ),
+        "base_abs_yaw_rate_body_nominal_mean": _mean(
+            abs(row["base_yaw_rate_body_rad_s"]) for row in yaw_drift_samples
+        ),
+        "base_yaw_rate_integral_nominal_rad": sum(
+            row["base_yaw_rate_body_rad_s"] * float(env.dt)
+            for row in yaw_drift_samples
+        ),
+        "base_abs_yaw_delta_from_start_nominal_max": max(
+            (abs(row["base_yaw_delta_from_start_rad"]) for row in yaw_drift_samples),
+            default=float("nan"),
         ),
         "vx_tracking_error_post_force_mean": _phase_mean(
             post_samples, "post_force", "vx_tracking_error"

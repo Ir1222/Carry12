@@ -21,6 +21,234 @@ from legged_gym.envs.g1.carrybox import LeggedRobot as CarryBoxBase
 It does not inherit from or import the PI, boxperturb, resume, or old debug env
 lineages.
 
+
+# CarryBox Clean Perturb Evaluation
+
+## Important: Avoid Parity Mode
+
+For the current `evaluate.py`, formal perturbation evaluation should always use:
+
+```text
+--sweep
+```
+
+even when testing only **one robot / one force condition**.
+
+This is because the current implementation uses:
+
+```python
+single_run_nominal_parity = bool(not eval_args.sweep)
+```
+
+Therefore:
+
+```text
+without --sweep
+→ single-run nominal parity environment
+
+with --sweep
+→ independent controlled evaluation environment
+```
+
+For formal force evaluation, do **not** use:
+
+```text
+--parity_mode play_baseline
+--parity_debug
+--checkpoint_parity
+```
+
+The desired controlled evaluation environment is:
+
+```text
+num_envs = 1
+episode_length_s = 30
+vx = 0.6 m/s
+vy = 0.0 m/s
+yaw_rate = 0.0 rad/s
+
+box random_size = False
+box random_density = False
+```
+
+The Stage-1 training command distribution is:
+
+```text
+vx in [0.4, 0.8]
+vy = 0
+yaw_rate = 0
+```
+
+Therefore the evaluator command `vx = 0.6 m/s` remains inside the training distribution.
+
+---
+
+## Single No-Force Baseline
+
+For comparing the same controlled evaluation environment without external force.
+
+```bash
+python3 experiments/carrybox_clean_perturb/evaluate.py --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt --no_force --hold_durations=5.0 --seeds=2 --sweep --verbose
+
+```
+
+The force parameters are still required to define the singleton sweep condition, but no external force is applied because:
+
+```text
+--no_force
+```
+
+disables force scheduling.
+
+This should be used as the direct no-force control for the corresponding force trial above.
+
+---
+
+## Single Force Trial
+
+For visually inspecting one robot under one force condition in the Isaac Gym viewer.
+
+Use `--sweep` with only one value for each sweep parameter.
+
+```bash
+python experiments/carrybox_clean_perturb/evaluate.py \
+  --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt \
+  --profile smooth_hold \
+  --sweep \
+  --directions=+box_x \
+  --betas=2.0 \
+  --seeds=2 \
+  --hold_durations=5.0 \
+  --verbose
+```
+
+This gives:
+
+```text
+num_envs = 1
+episode_length_s = 30
+command = (0.6, 0.0, 0.0)
+
+direction = +box_x
+beta = 2.0
+seed = 2
+hold_duration = 5.0 s
+```
+
+No CSV is generated because `--save_csv` is not specified.
+
+---
+
+## Full Sweep
+
+Fixed evaluation environment, suitable for systematic force testing across directions, magnitudes, seeds, and durations.
+
+```bash
+python experiments/carrybox_clean_perturb/evaluate.py \
+  --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt \
+  --profile smooth_hold \
+  --sweep \
+  --directions=+box_x,-box_x,+box_y,-box_y \
+  --betas=0.1,0.3,0.5 \
+  --seeds=1,2,3 \
+  --hold_durations=0.5,1.0,2.0 \
+  --save_csv
+```
+
+This performs the Cartesian product of:
+
+```text
+4 directions
+× 3 beta values
+× 3 seeds
+× 3 hold durations
+```
+
+while keeping the evaluator environment definition fixed.
+
+---
+
+## Parity Mode
+
+Parity is a **diagnostic mode**, not the environment that should be used for formal force evaluation.
+
+Its purpose is to check whether the evaluator remains behaviorally consistent with the original clean `play.py` / CarryBox policy execution.
+
+Explicit play-baseline parity is invoked with:
+
+```bash
+python experiments/carrybox_clean_perturb/evaluate.py \
+  --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt \
+  --parity_mode play_baseline
+```
+
+The parity baseline uses a play-style command:
+
+```text
+vx = 0.8 m/s
+vy = 0.0 m/s
+yaw_rate = 0.0 rad/s
+```
+
+and uses:
+
+```text
+episode_length_s = 10
+play-style environment configuration
+```
+
+This mode is useful for debugging questions such as:
+
+```text
+Does the checkpoint still behave correctly?
+
+Does actor-only inference reproduce the original policy behavior?
+
+Did changes to evaluate.py alter the nominal CarryBox rollout?
+```
+
+It should **not** be used for controlled external-force experiments.
+
+---
+
+## Rule of Thumb
+
+For all formal force experiments in the current repo:
+
+```text
+Always include --sweep.
+```
+
+### One condition
+
+```text
+--sweep
+--directions=<one direction>
+--betas=<one beta>
+--seeds=<one seed>
+--hold_durations=<one duration>
+```
+
+### Multiple conditions
+
+```text
+--sweep
+--directions=<multiple directions>
+--betas=<multiple betas>
+--seeds=<multiple seeds>
+--hold_durations=<multiple durations>
+```
+
+### No-force control
+
+Use the **same singleton sweep configuration** and add:
+
+```text
+--no_force
+```
+
+This keeps the policy, seed, command, box configuration, episode horizon, and evaluation environment consistent, while changing only whether the external perturbation is applied.
+
 ## Phase A Audit
 
 Clean `carrybox.py` findings:
@@ -136,6 +364,8 @@ python experiments/carrybox_clean_perturb/evaluate.py \
 
 Sweep:
 
+fix env setting, suitable for full testing
+
 ```bash
 python experiments/carrybox_clean_perturb/evaluate.py \
   --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt \
@@ -148,6 +378,11 @@ python experiments/carrybox_clean_perturb/evaluate.py \
   --save_csv
 ```
 
+for single robot walk testing, without csv output
+
+```bash
+python3 experiments/carrybox_clean_perturb/evaluate.py --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt --profile smooth_hold --directions=+box_x --betas=2.0 --hold_durations=5.0 --seeds=2 --sweep --verbose
+```
 For single-trial nominal parity runs, the command is injected like play.py:
 
 ```text
