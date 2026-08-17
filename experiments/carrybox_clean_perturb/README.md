@@ -92,6 +92,10 @@ python3 experiments/carrybox_clean_perturb/evaluate.py --resume_path legged_gym/
 
 ```
 
+```
+python3 experiments/carrybox_clean_perturb/evaluate.py --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt --profile smooth_hold --directions=+box_x --betas=2.0 --hold_durations=8.0 --seeds=2 --sweep --verbose
+```
+
 The force parameters are still required to define the singleton sweep condition, but no external force is applied because:
 
 ```text

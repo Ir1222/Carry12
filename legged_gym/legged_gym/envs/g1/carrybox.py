@@ -725,14 +725,11 @@ class LeggedRobot(BaseTask):
                                                      self.command_ranges["lin_vel_x"][1],
                                                      (len(env_ids), 1),
                                                      device=self.device).squeeze(1)
-        self.commands[env_ids, 1] = torch_rand_float(self.command_ranges["lin_vel_y"][0],
-                                                     self.command_ranges["lin_vel_y"][1],
-                                                     (len(env_ids), 1),
-                                                     device=self.device).squeeze(1)
         self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0],
                                                      self.command_ranges["ang_vel_yaw"][1],
                                                      (len(env_ids), 1),
                                                      device=self.device).squeeze(1)
+        self.commands[env_ids, 2] *= torch.abs(self.commands[env_ids, 2]) > self.cfg.commands.ang_vel_clip
 
     def _compute_torques(self, actions):
         """ Compute torques from actions.

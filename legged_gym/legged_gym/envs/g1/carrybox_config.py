@@ -222,6 +222,7 @@ class G1Cfg(LeggedRobotCfg):
         initial_joint_pos_scale = [1.0, 1.0]
         initial_joint_pos_offset = [-0.1, 0.1]
 
+        # disturbance = False
         disturbance = use_random
         disturbance_interval = 8
         disturbance_range = [-50, 50]
@@ -239,12 +240,12 @@ class G1Cfg(LeggedRobotCfg):
         heading_command = False
         heading_to_ang_vel = False
         lin_vel_clip = 0.0
-        ang_vel_clip = 0.0
+        ang_vel_clip = 0.1
 
         class ranges:
-            lin_vel_x = [0.4, 0.8]
+            lin_vel_x = [0.3, 0.8]
             lin_vel_y = [0.0, 0.0]
-            ang_vel_yaw = [0.0, 0.0]
+            ang_vel_yaw = [-0.4, 0.4]
             heading = [0.0, 0.0]
 
     class rewards( LeggedRobotCfg.rewards ):

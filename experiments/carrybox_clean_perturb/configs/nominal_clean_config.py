@@ -6,7 +6,7 @@ from configs.evaluation_config import FIXED_COMMAND, apply_evaluation_config
 
 
 NOMINAL_CLEAN_COMMAND = FIXED_COMMAND
-DEFAULT_NOMINAL_OBSERVATION_S = 10.0
+DEFAULT_NOMINAL_OBSERVATION_S = 30.0
 
 
 def apply_nominal_clean_config(
