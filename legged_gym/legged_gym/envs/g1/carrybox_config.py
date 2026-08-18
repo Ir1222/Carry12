@@ -237,13 +237,21 @@ class G1Cfg(LeggedRobotCfg):
     class commands(LeggedRobotCfg.commands):
         curriculum = False
         resampling_time = 0.0
+        resample_carry_commands = True
+        carry_resample_interval_s = [1.5, 3.0]
+        carry_stop_probability = 0.2
+        carry_moving_vx_range = [0.2, 0.8]
+        carry_turn_probability = 0.4
+        carry_turn_yaw_range = [0.1, 0.4]
+        heading_kp = 1.0
+        max_yaw_rate = 0.4
         heading_command = False
         heading_to_ang_vel = False
         lin_vel_clip = 0.0
         ang_vel_clip = 0.1
 
         class ranges:
-            lin_vel_x = [0.3, 0.8]
+            lin_vel_x = [0.0, 0.8]
             lin_vel_y = [0.0, 0.0]
             ang_vel_yaw = [-0.4, 0.4]
             heading = [0.0, 0.0]
@@ -263,6 +271,7 @@ class G1Cfg(LeggedRobotCfg):
             walk_task = 1.0
             carryup_task = 1.0
             carry_velocity_task = 1.0
+            carry_heading_hold = 0.3
 
         # walk
         robot2object_pos = 0.0
@@ -277,6 +286,7 @@ class G1Cfg(LeggedRobotCfg):
         # carry velocity tracking
         carry_lin_vel = 1.0
         carry_yaw_vel = 0.5
+        carry_heading_sigma = 0.25
 
         target_speed_loco = 0.85
         thresh_robot2object = 0.7

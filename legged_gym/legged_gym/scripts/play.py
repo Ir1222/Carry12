@@ -34,6 +34,8 @@ def play(args):
         env_cfg.asset.box.random_props = False
         env_cfg.asset.box.reset_mode = 'default'
         env_cfg.env.episode_length_s = 10
+        if args.task == 'carrybox':
+            env_cfg.commands.resample_carry_commands = False
     
     if args.play_dataset:
         train_cfg.runner.resume = False
@@ -42,11 +44,18 @@ def play(args):
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
-    obs = env.get_observations()
 
     # load policy
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
+
+    if args.task == 'carrybox':
+        env.commands[:, 0] = 0.8
+        env.commands[:, 1] = 0.0
+        env.commands[:, 2] = 0.0
+        env.carry_policy_commands[:, :3] = env.commands[:, :3]
+        env.compute_observations()
+    obs = env.get_observations()
     
     # export policy as a jit & onnx module (used to run it from C++)
     if EXPORT_POLICY:
@@ -63,9 +72,10 @@ def play(args):
         policy = load_onnx_policy(onnx_path)
 
     for i in range(10*int(env.max_episode_length)):
-        env.commands[:, 0] = 0.8
-        env.commands[:, 1] = 0.0
-        env.commands[:, 2] = 0.0
+        if args.task == 'carrybox_perturb':
+            env.commands[:, 0] = 0.8
+            env.commands[:, 1] = 0.0
+            env.commands[:, 2] = 0.0
         result = env.gym.fetch_results(env.sim, True)
         actions = policy(obs.detach())
         if args.play_dataset:
