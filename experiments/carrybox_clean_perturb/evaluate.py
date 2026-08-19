@@ -37,6 +37,7 @@ from evaluation.force_profiles import (  # noqa: E402
     VALID_DIRECTIONS,
     VALID_PROFILES,
 )
+from evaluation.commands import set_fixed_evaluation_command  # noqa: E402
 from evaluation.logger import EvaluationCsvLogger  # noqa: E402
 from evaluation.metrics import sample_policy_metrics, summarize_trial  # noqa: E402
 from evaluation.parity_diagnostics import (  # noqa: E402
@@ -281,7 +282,8 @@ def _reset_for_trial(env, seed, parity_debug=False):
         print_actor_history("evaluate_before_trial_history_clear", env, env.get_observations())
     if hasattr(env, "reset_evaluation_trial_state"):
         env.reset_evaluation_trial_state(clear_actor_history=True)
-    obs, _ = env.reset()
+    env.reset()
+    obs = set_fixed_evaluation_command(env, FIXED_COMMAND)
     env.clear_summary_snapshot(env_id=0)
     return obs
 
@@ -353,17 +355,10 @@ def quat_rotate_for_eval(env, local, env_id):
     return quat_rotate(env.box_states[env_id, 3:7].unsqueeze(0), local)[0]
 
 
-def run_trial(env, policy, condition, checkpoint, eval_args, initial_obs=None):
+def run_trial(env, policy, condition, checkpoint, eval_args):
     _print_trial_header(condition, eval_args.no_force)
-    use_runner_reset_obs = initial_obs is not None
-    if use_runner_reset_obs:
-        obs = initial_obs
-        if eval_args.parity_debug:
-            print("[PARITY][evaluate] using runner-reset observation; no trial reset")
-    else:
-        obs = _reset_for_trial(env, condition.seed, parity_debug=eval_args.parity_debug)
-    expected_command = None if use_runner_reset_obs else FIXED_COMMAND
-    assert_startup_compatibility(env, obs, expected_command=expected_command)
+    obs = _reset_for_trial(env, condition.seed, parity_debug=eval_args.parity_debug)
+    assert_startup_compatibility(env, obs, expected_command=FIXED_COMMAND)
     if eval_args.parity_debug:
         print_initial_state("evaluate_after_trial_reset", env, obs)
 
@@ -406,13 +401,8 @@ def run_trial(env, policy, condition, checkpoint, eval_args, initial_obs=None):
         env.cfg.clean_perturbation.enabled = True
 
     rollout_steps = int(env.max_episode_length) + post_force_steps + 10
-    if use_runner_reset_obs:
-        rollout_steps = 10 * int(env.max_episode_length)
 
     for step_id in range(rollout_steps):
-        if use_runner_reset_obs:
-            _set_play_baseline_command(env)
-            env.gym.fetch_results(env.sim, True)
         actor_obs = obs
         actions, step_result = _policy_step(env, policy, obs)
         obs, _, _, dones, _, termination_ids, _, _ = step_result
@@ -431,8 +421,6 @@ def run_trial(env, policy, condition, checkpoint, eval_args, initial_obs=None):
             reason = env.clean_eval_last_termination_reason[0]
             if not reason and termination_ids.numel() > 0:
                 reason = "termination"
-            if use_runner_reset_obs and reason == "timeout":
-                continue
             failure["physical_failure"] = True
             failure["termination_reason"] = reason or "done"
             break
@@ -544,14 +532,13 @@ def play(eval_args, legged_args):
     if eval_args.parity_mode == "play_baseline":
         return run_play_equivalent_baseline(eval_args, legged_args)
 
-    single_run_nominal_parity = bool(not eval_args.sweep)
     _register_clean_source_task()
     env_cfg, train_cfg = task_registry.get_cfgs(name=CLEAN_SOURCE_TASK)
     env_cfg = apply_evaluation_config(
         env_cfg,
         verbose=eval_args.verbose,
         trace_enabled=eval_args.save_csv,
-        play_nominal_parity=single_run_nominal_parity,
+        play_nominal_parity=False,
     )
     if eval_args.no_force:
         env_cfg.clean_perturbation.enabled = False
@@ -566,18 +553,9 @@ def play(eval_args, legged_args):
     env, _ = task_registry.make_env(name=EVAL_TASK, args=legged_args, env_cfg=env_cfg)
     print("[CONFIG] clean CarryBox source registered through task_registry")
     print("[CONFIG] evaluator env inherits directly from clean carrybox.LeggedRobot")
-    if single_run_nominal_parity:
-        print(
-            "[CONFIG] single-run nominal parity: play.py-style command "
-            f"{PLAY_NOMINAL_COMMAND}, num_envs={env_cfg.env.num_envs}, "
-            "episode_length_s=10, box random_size/random_density preserved."
-        )
-    else:
-        print(f"[CONFIG] fixed command={FIXED_COMMAND}")
-        print(
-            "[CONFIG] Stage-1 training command range was "
-            "vx in [0.4,0.8], vy=0, yaw=0; evaluator uses vx=0.6."
-        )
+    print("[CONFIG] training uses dynamic carry-command resampling")
+    print("[CONFIG] evaluator disables carry-command resampling")
+    print(f"[CONFIG] evaluator fixed command={FIXED_COMMAND}")
 
     ppo_runner, train_cfg = task_registry.make_alg_runner(
         env=env,
@@ -606,14 +584,12 @@ def play(eval_args, legged_args):
 
     obs = None
     for condition in trials:
-        initial_obs = env.get_observations() if single_run_nominal_parity else None
         obs, trace_rows, summary = run_trial(
             env,
             policy,
             condition,
             legged_args.resume_path,
             eval_args,
-            initial_obs=initial_obs,
         )
         if logger is not None:
             logger.write_trace(condition.trial_id, trace_rows)
@@ -630,6 +606,7 @@ def _apply_play_overrides(env_cfg, train_cfg):
     env_cfg.asset.box.random_props = False
     env_cfg.asset.box.reset_mode = "default"
     env_cfg.env.episode_length_s = 10
+    env_cfg.commands.resample_carry_commands = False
     train_cfg.runner.resume = True
     return env_cfg, train_cfg
 
@@ -662,7 +639,7 @@ def run_play_equivalent_baseline(eval_args, legged_args):
         train_cfg=train_cfg,
     )
     policy = ppo_runner.get_inference_policy(device=env.device)
-    obs = env.get_observations()
+    obs = set_fixed_evaluation_command(env, PLAY_BASELINE_COMMAND)
 
     if eval_args.parity_debug:
         print_initial_state("play_baseline_after_runner_reset", env, obs)

@@ -31,6 +31,7 @@ def apply_evaluation_config(
 
     env_cfg.commands.curriculum = False
     env_cfg.commands.resampling_time = 0.0
+    env_cfg.commands.resample_carry_commands = False
     env_cfg.commands.heading_command = False
     env_cfg.commands.heading_to_ang_vel = False
     env_cfg.commands.lin_vel_clip = 0.0

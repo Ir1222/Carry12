@@ -43,6 +43,7 @@ from evaluation.force_profiles import (  # noqa: E402
     VALID_DIRECTIONS,
     VALID_PROFILES,
 )
+from evaluation.commands import set_fixed_evaluation_command  # noqa: E402
 from evaluation.logger import EvaluationCsvLogger  # noqa: E402
 from evaluation.metrics import sample_policy_metrics, summarize_trial  # noqa: E402
 from evaluation.trial import generate_sweep, make_single_trial  # noqa: E402
@@ -190,7 +191,8 @@ def _reset_for_trial(env, seed):
     if env.clean_eval_trace_enabled:
         env.end_trace()
     env.reset_evaluation_trial_state(clear_actor_history=True)
-    obs, _ = env.reset()
+    env.reset()
+    obs = set_fixed_evaluation_command(env, env.cfg.nominal_clean.command)
     env.clear_summary_snapshot(env_id=0)
     return obs
 
@@ -422,6 +424,8 @@ def play(eval_args, legged_args):
     print("[CONFIG] nominal-clean evaluator inherits experiment perturb env")
     print("[CONFIG] training CarryBox env/config/task registration unchanged")
     print("[CONFIG] full task path: default stand -> approach -> pickup -> carry")
+    print("[CONFIG] training uses dynamic carry-command resampling")
+    print("[CONFIG] evaluator disables carry-command resampling")
     print(f"[CONFIG] fixed body-frame command={command}")
     print("[CONFIG] domain randomization, reset randomization, and obs noise disabled")
     if not eval_args.with_force:

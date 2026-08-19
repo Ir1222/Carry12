@@ -24,31 +24,16 @@ lineages.
 
 # CarryBox Clean Perturb Evaluation
 
-## Important: Avoid Parity Mode
+## Controlled Evaluation Mode
 
-For the current `evaluate.py`, formal perturbation evaluation should always use:
+Formal perturbation evaluation may use either a single trial or a sweep. Both use
+the same controlled evaluator configuration. Use:
 
 ```text
 --sweep
 ```
 
-even when testing only **one robot / one force condition**.
-
-This is because the current implementation uses:
-
-```python
-single_run_nominal_parity = bool(not eval_args.sweep)
-```
-
-Therefore:
-
-```text
-without --sweep
-→ single-run nominal parity environment
-
-with --sweep
-→ independent controlled evaluation environment
-```
+for batch evaluation across the requested condition lists.
 
 For formal force evaluation, do **not** use:
 
@@ -71,15 +56,14 @@ box random_size = False
 box random_density = False
 ```
 
-The Stage-1 training command distribution is:
+Training uses dynamic carry-command resampling with stop, forward, and turning
+segments. Controlled evaluation disables that resampling and explicitly sets:
 
 ```text
-vx in [0.4, 0.8]
+vx = 0.6 m/s
 vy = 0
 yaw_rate = 0
 ```
-
-Therefore the evaluator command `vx = 0.6 m/s` remains inside the training distribution.
 
 ---
 
@@ -258,11 +242,12 @@ This keeps the policy, seed, command, box configuration, episode horizon, and ev
 Clean `carrybox.py` findings:
 
 - Actor task observation is built in `compute_task_observations()` as:
-  `box_pos_local(3) + box_rot_6d_local(6) + box_size(3) + self.commands[:, :3](3)`.
+  `box_pos_local(3) + box_rot_6d_local(6) + box_size(3) + self.carry_policy_commands[:, :3](3)`.
 - Current task observation dimension is 15.
 - Actor observation dimension is `(108 proprio + 15 task) * 6 history = 738`.
 - Commands are sampled in `_resample_carry_commands()`, called from `_reset_task()`.
-- Current Stage-1 command ranges are `vx in [0.4, 0.8]`, `vy = 0`, `yaw = 0`.
+- Training samples stop, forward (`vx in [0.2, 0.8]`), and turning
+  (`|yaw| in [0.1, 0.4]`) segments through `_resample_carry_commands()`.
 - The physics loop in `step()` runs `cfg.control.decimation` substeps and calls
   `gym.simulate()` once per substep.
 - The box actor is created before the robot actor; the evaluator resolves the box
@@ -387,7 +372,8 @@ for single robot walk testing, without csv output
 ```bash
 python3 experiments/carrybox_clean_perturb/evaluate.py --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug13_14-39-11_stage1_UpAndWalk/model_9500.pt --profile smooth_hold --directions=+box_x --betas=2.0 --hold_durations=5.0 --seeds=2 --sweep --verbose
 ```
-For single-trial nominal parity runs, the command is injected like play.py:
+For explicit play parity diagnostics (`--parity_mode play_baseline`), the command
+is injected like `play.py`:
 
 ```text
 vx = 0.8 m/s
@@ -395,11 +381,8 @@ vy = 0.0 m/s
 yaw_rate = 0.0 rad/s
 ```
 
-This is inside the current Stage-1 training distribution:
-`vx in [0.4, 0.8]`, `vy = 0`, `yaw = 0`.
-
-Sweep mode keeps the independent evaluator trial setup for batch experiments:
-`num_envs = 1`, `episode_length_s = 30`, and fixed command `vx = 0.6`.
+Normal single-trial and sweep evaluation both keep the independent controlled
+setup: `num_envs = 1`, `episode_length_s = 30`, and fixed command `vx = 0.6`.
 
 ## Confirmed Carry
 
