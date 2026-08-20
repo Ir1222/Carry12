@@ -287,6 +287,8 @@ class G1Cfg(LeggedRobotCfg):
         carry_lin_vel = 1.0
         carry_yaw_vel = 0.5
         carry_heading_sigma = 0.25
+        carry_heading_huber_delta = 0.35
+        carry_heading_huber_weight = 1.0
 
         target_speed_loco = 0.85
         thresh_robot2object = 0.7

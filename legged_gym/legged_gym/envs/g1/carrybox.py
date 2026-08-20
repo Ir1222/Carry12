@@ -1993,7 +1993,11 @@ class LeggedRobot(BaseTask):
         return carryup_reward
 
     def _reward_carry_velocity_task(self):
-        lin_vel_error = torch.sum(torch.square(self.carry_policy_commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
+        desired_heading_dir = torch.stack((torch.cos(self.carry_heading_ref),
+                                           torch.sin(self.carry_heading_ref)), dim=-1)
+        desired_world_lin_vel_xy = self.carry_policy_commands[:, 0:1] * desired_heading_dir
+        actual_world_lin_vel_xy = self.rigid_body_states[:, self.upper_body_index, 7:9]
+        lin_vel_error = torch.sum(torch.square(desired_world_lin_vel_xy - actual_world_lin_vel_xy), dim=1)
         lin_vel_reward = torch.exp(-lin_vel_error / self.cfg.rewards.tracking_sigma)
 
         yaw_vel_error = torch.square(self.carry_policy_commands[:, 2] - self.base_ang_vel[:, 2])
@@ -2005,6 +2009,19 @@ class LeggedRobot(BaseTask):
         return carry_reward
 
     def _reward_carry_heading_hold(self):
-        heading_reward = torch.exp(-torch.square(self.carry_heading_error) / self.cfg.rewards.carry_heading_sigma)
+        heading_alignment = torch.exp(
+            -torch.square(self.carry_heading_error) / self.cfg.rewards.carry_heading_sigma)
+
+        abs_heading_error = torch.abs(self.carry_heading_error)
+        heading_huber_delta = self.cfg.rewards.carry_heading_huber_delta
+        heading_huber_error = torch.where(
+            abs_heading_error <= heading_huber_delta,
+            0.5 * torch.square(self.carry_heading_error) / heading_huber_delta,
+            abs_heading_error - 0.5 * heading_huber_delta)
+        heading_huber_max = torch.pi - 0.5 * heading_huber_delta
+        heading_huber_error_normalized = heading_huber_error / heading_huber_max
+
+        heading_reward = (heading_alignment - self.cfg.rewards.carry_heading_huber_weight
+                           * heading_huber_error_normalized)
         heading_reward[~self.is_stage_carry] = 0.
         return heading_reward
