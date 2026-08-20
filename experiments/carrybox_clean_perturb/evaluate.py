@@ -288,7 +288,12 @@ def _policy_step(env, policy, obs):
     return actions, env.step(actions.detach())
 
 
-def _print_heading_debug(env, policy_step):
+def _wrapped_yaw_delta(current_yaw, previous_yaw):
+    """Return the signed yaw difference wrapped to [-pi, pi)."""
+    return torch.remainder(current_yaw - previous_yaw + torch.pi, 2.0 * torch.pi) - torch.pi
+
+
+def _print_heading_debug(env, policy_step, pelvis_yaw_rate):
     """Print read-only post-step heading diagnostics for environment 0."""
     env_id = 0
     raw_vx = float(env.commands[env_id, 0].item())
@@ -300,7 +305,7 @@ def _print_heading_debug(env, policy_step):
     heading_error = float(env.carry_heading_error[env_id].item())
     body_vx = float(env.base_lin_vel[env_id, 0].item())
     body_vy = float(env.base_lin_vel[env_id, 1].item())
-    body_yaw_rate = float(env.base_ang_vel[env_id, 2].item())
+    upper_body_yaw_rate = float(env.base_ang_vel[env_id, 2].item())
     world_x = float(env.root_states[env_id, 0].item())
     world_y = float(env.root_states[env_id, 1].item())
     is_stage_carry = bool(env.is_stage_carry[env_id].item())
@@ -310,10 +315,58 @@ def _print_heading_debug(env, policy_step):
         f"raw=(vx={raw_vx:.3f},yaw={raw_yaw_cmd:.3f}) "
         f"policy=(vx={policy_vx:.3f},yaw={policy_yaw_cmd:.3f}) "
         f"pelvis_yaw={pelvis_yaw:.4f} ref={heading_ref:.4f} err={heading_error:.4f} "
+        f"pelvis_yaw_rate={float(pelvis_yaw_rate.item()):.4f} "
         f"body_vel=({body_vx:.3f},{body_vy:.3f}) "
-        f"body_yaw_rate={body_yaw_rate:.4f} "
+        f"upper_body_yaw_rate={upper_body_yaw_rate:.4f} "
         f"world_xy=({world_x:.3f},{world_y:.3f}) "
         f"stage_carry={int(is_stage_carry)} confirmed={int(confirmed_carry)}"
+    )
+
+
+def _print_reward_debug(env, policy_step):
+    """Print evaluator-local diagnostics matching the active carry reward formulas."""
+    env_id = 0
+    tracking_sigma = float(env.cfg.rewards.tracking_sigma)
+    carry_heading_sigma = float(env.cfg.rewards.carry_heading_sigma)
+    carry_lin_vel = float(env.cfg.rewards.carry_lin_vel)
+    carry_yaw_vel = float(env.cfg.rewards.carry_yaw_vel)
+    carry_velocity_scale = float(env.cfg.rewards.scales.carry_velocity_task)
+    carry_heading_scale = float(env.cfg.rewards.scales.carry_heading_hold)
+
+    lin_vel_error = torch.sum(
+        torch.square(
+            env.carry_policy_commands[env_id, :2] - env.base_lin_vel[env_id, :2]
+        )
+    )
+    yaw_vel_error = torch.square(
+        env.carry_policy_commands[env_id, 2] - env.base_ang_vel[env_id, 2]
+    )
+    lin_vel_reward = torch.exp(-lin_vel_error / tracking_sigma)
+    yaw_vel_reward = torch.exp(-yaw_vel_error / tracking_sigma)
+    carry_velocity_raw = carry_lin_vel * lin_vel_reward + carry_yaw_vel * yaw_vel_reward
+
+    heading_error = env.carry_heading_error[env_id]
+    heading_hold_raw = torch.exp(-torch.square(heading_error) / carry_heading_sigma)
+
+    # The environment gates both carry rewards before applying their configured scales.
+    is_stage_carry = bool(env.is_stage_carry[env_id].item())
+    if is_stage_carry:
+        carry_velocity_weighted = carry_velocity_scale * carry_velocity_raw
+        heading_hold_weighted = carry_heading_scale * heading_hold_raw
+    else:
+        carry_velocity_weighted = torch.zeros_like(carry_velocity_raw)
+        heading_hold_weighted = torch.zeros_like(heading_hold_raw)
+
+    print(
+        f"[REWARD_DEBUG] step={policy_step} "
+        f"lin_err={float(lin_vel_error.item()):.4f} "
+        f"yaw_err={float(yaw_vel_error.item()):.4f} "
+        f"lin_r={float(lin_vel_reward.item()):.4f} "
+        f"yaw_r={float(yaw_vel_reward.item()):.4f} "
+        f"carry_raw={float(carry_velocity_raw.item()):.4f} "
+        f"carry_weighted={float(carry_velocity_weighted.item()):.4f} "
+        f"heading_raw={float(heading_hold_raw.item()):.4f} "
+        f"heading_weighted={float(heading_hold_weighted.item()):.4f}"
     )
 
 
@@ -401,6 +454,12 @@ def quat_rotate_for_eval(env, local, env_id):
 def run_trial(env, policy, condition, checkpoint, eval_args):
     _print_trial_header(condition, eval_args.no_force)
     obs = _reset_for_trial(env, condition.seed, parity_debug=eval_args.parity_debug)
+    previous_pelvis_yaw = None
+    policy_dt = None
+    if eval_args.heading_debug:
+        # Evaluator-local state: reset separately for every trial, immediately after reset.
+        previous_pelvis_yaw = env.yaw[0].detach().clone()
+        policy_dt = float(env.dt)
     assert_startup_compatibility(env, obs, expected_command=FIXED_COMMAND)
     if eval_args.parity_debug:
         print_initial_state("evaluate_after_trial_reset", env, obs)
@@ -449,6 +508,14 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
         actor_obs = obs
         actions, step_result = _policy_step(env, policy, obs)
         obs, _, _, dones, _, termination_ids, _, _ = step_result
+        pelvis_yaw_rate = None
+        if eval_args.heading_debug:
+            current_pelvis_yaw = env.yaw[0].detach()
+            pelvis_yaw_rate = _wrapped_yaw_delta(
+                current_pelvis_yaw, previous_pelvis_yaw
+            ) / policy_dt
+            # Update every policy step, independent of the print interval.
+            previous_pelvis_yaw = current_pelvis_yaw.clone()
         if eval_args.parity_debug and step_id < int(eval_args.parity_trace_steps):
             print_policy_step_trace(
                 "evaluate",
@@ -477,7 +544,8 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
                 heading_debug_phase
                 and policy_step % int(eval_args.heading_debug_interval) == 0
             ):
-                _print_heading_debug(env, policy_step)
+                _print_heading_debug(env, policy_step, pelvis_yaw_rate)
+                _print_reward_debug(env, policy_step)
 
         samples.append(sample_policy_metrics(env, direction_world_t, force_start, phase))
 
