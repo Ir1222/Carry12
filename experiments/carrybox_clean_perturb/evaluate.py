@@ -117,6 +117,18 @@ def parse_evaluator_args():
         default=False,
         help="Compare actor-only loading against full checkpoint loading on one obs.",
     )
+    parser.add_argument(
+        "--heading_debug",
+        action="store_true",
+        default=False,
+        help="Print evaluator-only carry heading diagnostics for environment 0.",
+    )
+    parser.add_argument(
+        "--heading_debug_interval",
+        type=int,
+        default=25,
+        help="Policy-step interval for --heading_debug diagnostics.",
+    )
     parser.add_argument("--directions", type=_parse_str_list, default=DEFAULT_DIRECTIONS)
     parser.add_argument("--betas", type=_parse_float_list, default=DEFAULT_BETAS)
     parser.add_argument("--seeds", type=_parse_int_list, default=DEFAULT_SEEDS)
@@ -126,6 +138,8 @@ def parse_evaluator_args():
         default=DEFAULT_HOLD_DURATIONS,
     )
     eval_args, remaining = parser.parse_known_args()
+    if eval_args.heading_debug_interval <= 0:
+        parser.error("--heading_debug_interval must be a positive integer")
     sys.argv = [sys.argv[0], *remaining]
     return eval_args
 
@@ -272,6 +286,35 @@ def _policy_action(policy, obs):
 def _policy_step(env, policy, obs):
     actions = _policy_action(policy, obs)
     return actions, env.step(actions.detach())
+
+
+def _print_heading_debug(env, policy_step):
+    """Print read-only post-step heading diagnostics for environment 0."""
+    env_id = 0
+    raw_vx = float(env.commands[env_id, 0].item())
+    raw_yaw_cmd = float(env.commands[env_id, 2].item())
+    policy_vx = float(env.carry_policy_commands[env_id, 0].item())
+    policy_yaw_cmd = float(env.carry_policy_commands[env_id, 2].item())
+    pelvis_yaw = float(env.yaw[env_id].item())
+    heading_ref = float(env.carry_heading_ref[env_id].item())
+    heading_error = float(env.carry_heading_error[env_id].item())
+    body_vx = float(env.base_lin_vel[env_id, 0].item())
+    body_vy = float(env.base_lin_vel[env_id, 1].item())
+    body_yaw_rate = float(env.base_ang_vel[env_id, 2].item())
+    world_x = float(env.root_states[env_id, 0].item())
+    world_y = float(env.root_states[env_id, 1].item())
+    is_stage_carry = bool(env.is_stage_carry[env_id].item())
+    confirmed_carry = bool(env.confirmed_carry_buf[env_id].item())
+    print(
+        f"[HEADING_DEBUG] step={policy_step} "
+        f"raw=(vx={raw_vx:.3f},yaw={raw_yaw_cmd:.3f}) "
+        f"policy=(vx={policy_vx:.3f},yaw={policy_yaw_cmd:.3f}) "
+        f"pelvis_yaw={pelvis_yaw:.4f} ref={heading_ref:.4f} err={heading_error:.4f} "
+        f"body_vel=({body_vx:.3f},{body_vy:.3f}) "
+        f"body_yaw_rate={body_yaw_rate:.4f} "
+        f"world_xy=({world_x:.3f},{world_y:.3f}) "
+        f"stage_carry={int(is_stage_carry)} confirmed={int(confirmed_carry)}"
+    )
 
 
 def _reset_for_trial(env, seed, parity_debug=False):
@@ -424,6 +467,17 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
             failure["physical_failure"] = True
             failure["termination_reason"] = reason or "done"
             break
+
+        if eval_args.heading_debug:
+            policy_step = step_id + 1
+            heading_debug_phase = bool(env.is_stage_carry[0].item()) or bool(
+                env.confirmed_carry_buf[0].item()
+            )
+            if (
+                heading_debug_phase
+                and policy_step % int(eval_args.heading_debug_interval) == 0
+            ):
+                _print_heading_debug(env, policy_step)
 
         samples.append(sample_policy_metrics(env, direction_world_t, force_start, phase))
 
