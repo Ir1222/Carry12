@@ -32,6 +32,87 @@ class LeggedRobot(CarryBoxBase):
         super()._create_envs()
         self._init_clean_eval_body_indices()
 
+    def _reset_boxes(self, env_ids):
+        """Keep the evaluator's start platform below ground from reset onward."""
+        super()._reset_boxes(env_ids)
+        if len(env_ids) == 0:
+            return
+
+        cfg = self.cfg.clean_perturbation
+        if not bool(getattr(cfg, "flush_start_platform", False)):
+            return
+
+        ground_z = self.env_origins[env_ids, 2]
+        box_clearance = float(cfg.box_vertical_clearance)
+
+        # Preserve the base reset's randomized box XY/yaw, but start the box near
+        # the ground so removing the raised support cannot cause a long free fall.
+        self.box_states[env_ids, 2] = (
+            ground_z + self._box_size[env_ids, 2] / 2.0 + box_clearance
+        )
+        self.box_states[env_ids, 7:13] = 0.0
+
+        # A platform center one full platform height below the ground puts its
+        # top face 1 cm underground for the current 2 cm-thick platform. This
+        # avoids both a walking obstacle and a coplanar duplicate contact plane.
+        self.platform_pos[env_ids, 0:2] = self.box_states[env_ids, 0:2]
+        self.platform_pos[env_ids, 2] = ground_z - self._platform_height
+        self.platform_states[env_ids, 3:7] = self.default_quat
+        self.platform_states[env_ids, 7:13] = 0.0
+
+        self._assert_flush_start_geometry(env_ids, ground_z, box_clearance)
+
+    def _assert_flush_start_geometry(self, env_ids, ground_z, box_clearance):
+        """Validate evaluator-only reset geometry before tensors reach Isaac Gym."""
+        atol = 1.0e-6
+        expected_platform_top = ground_z - self._platform_height / 2.0
+        platform_top = self.platform_pos[env_ids, 2] + self._platform_height / 2.0
+        if not torch.allclose(
+            platform_top, expected_platform_top, atol=atol, rtol=0.0
+        ):
+            raise AssertionError(
+                "Evaluator platform top does not match the below-ground target."
+            )
+        if torch.any(platform_top >= ground_z).item():
+            raise AssertionError("Evaluator platform must remain strictly below ground.")
+
+        box_bottom = (
+            self.box_states[env_ids, 2] - self._box_size[env_ids, 2] / 2.0
+        )
+        expected_box_bottom = ground_z + float(box_clearance)
+        if not torch.allclose(box_bottom, expected_box_bottom, atol=atol, rtol=0.0):
+            raise AssertionError(
+                "Evaluator box bottom does not match its ground clearance."
+            )
+        if not torch.allclose(
+            self.platform_pos[env_ids, 0:2],
+            self.box_states[env_ids, 0:2],
+            atol=atol,
+            rtol=0.0,
+        ):
+            raise AssertionError("Evaluator platform and box XY positions must align.")
+
+        carryup_height = box_bottom - self.platform_pos[env_ids, 2]
+        start_displacement_xy = torch.linalg.vector_norm(
+            self.box_states[env_ids, 0:2] - self.platform_pos[env_ids, 0:2],
+            dim=-1,
+        )
+        starts_in_carry = (
+            carryup_height > self.cfg.rewards.thresh_carryup_height
+        ) | (
+            start_displacement_xy
+            > self.cfg.rewards.thresh_carry_start_displacement
+        )
+        if torch.any(starts_in_carry).item():
+            raise AssertionError(
+                "Evaluator flush-platform reset must not start in the carry stage."
+            )
+
+        if torch.any(self.box_states[env_ids, 7:13] != 0.0).item():
+            raise AssertionError("Evaluator box reset velocity must be zero.")
+        if torch.any(self.platform_states[env_ids, 7:13] != 0.0).item():
+            raise AssertionError("Evaluator platform reset velocity must be zero.")
+
     def _init_clean_eval_body_indices(self):
         body_names = self._get_robot_body_names()
         hand_token = self.cfg.asset.hand_colli_name

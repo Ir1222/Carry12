@@ -65,6 +65,8 @@ def apply_evaluation_config(
         pre_force_delay_s=DEFAULT_PRE_FORCE_DELAY_S,
         post_force_observation_s=DEFAULT_POST_FORCE_OBSERVATION_S,
         max_events_per_episode=1,
+        flush_start_platform=not bool(play_nominal_parity),
+        box_vertical_clearance=0.01,
         debug_draw_force=True,
         debug_force_draw_scale_m_per_N=1.0,
         debug_force_bundle_line_count=20,
