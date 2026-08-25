@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import sys
 
@@ -46,7 +47,11 @@ from evaluation.parity_diagnostics import (  # noqa: E402
     print_initial_state,
     print_policy_step_trace,
 )
-from evaluation.trial import generate_sweep, make_single_trial  # noqa: E402
+from evaluation.trial import (  # noqa: E402
+    DEFAULT_COMMAND_SWEEP,
+    generate_sweep,
+    make_single_trial,
+)
 from legged_gym import LEGGED_GYM_ROOT_DIR  # noqa: E402
 from legged_gym.envs.g1.carrybox import LeggedRobot as CarryBoxBase  # noqa: E402
 from legged_gym.envs.g1.carrybox_config import G1Cfg, G1CfgPPO  # noqa: E402
@@ -73,6 +78,24 @@ def _parse_str_list(text):
     return tuple(item.strip() for item in str(text).split(",") if item.strip())
 
 
+def _parse_command(text):
+    parts = [item.strip() for item in str(text).split(",")]
+    if len(parts) != 3 or any(not item for item in parts):
+        raise argparse.ArgumentTypeError(
+            "--command must contain exactly three values: vx,vy,yaw_rate"
+        )
+    try:
+        command = tuple(float(item) for item in parts)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "--command must contain exactly three floating-point values: "
+            "vx,vy,yaw_rate"
+        ) from exc
+    if not all(math.isfinite(value) for value in command):
+        raise argparse.ArgumentTypeError("--command values must be finite")
+    return command
+
+
 def parse_evaluator_args():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--profile", choices=VALID_PROFILES, default="half_sine")
@@ -89,6 +112,20 @@ def parse_evaluator_args():
         default=DEFAULT_POST_FORCE_OBSERVATION_S,
     )
     parser.add_argument("--sweep", action="store_true", default=False)
+    command_group = parser.add_mutually_exclusive_group()
+    command_group.add_argument(
+        "--command",
+        type=_parse_command,
+        default=None,
+        metavar="VX,VY,YAW_RATE",
+        help="Use one static evaluation command for every requested force condition.",
+    )
+    command_group.add_argument(
+        "--command_sweep",
+        action="store_true",
+        default=False,
+        help="Evaluate the deterministic 21-condition static command grid.",
+    )
     parser.add_argument("--save_csv", action="store_true", default=False)
     parser.add_argument("--no_force", action="store_true", default=False)
     parser.add_argument("--output_dir", type=str, default=None)
@@ -131,7 +168,7 @@ def parse_evaluator_args():
     )
     parser.add_argument("--directions", type=_parse_str_list, default=DEFAULT_DIRECTIONS)
     parser.add_argument("--betas", type=_parse_float_list, default=DEFAULT_BETAS)
-    parser.add_argument("--seeds", type=_parse_int_list, default=DEFAULT_SEEDS)
+    parser.add_argument("--seeds", type=_parse_int_list, default=None)
     parser.add_argument(
         "--hold_durations",
         type=_parse_float_list,
@@ -140,6 +177,20 @@ def parse_evaluator_args():
     eval_args, remaining = parser.parse_known_args()
     if eval_args.heading_debug_interval <= 0:
         parser.error("--heading_debug_interval must be a positive integer")
+    if eval_args.command_sweep and not eval_args.no_force:
+        parser.error(
+            "--command_sweep requires --no_force; use --command for static-command "
+            "force evaluation"
+        )
+    if eval_args.command_sweep and eval_args.sweep:
+        parser.error("--command_sweep and the force --sweep are mutually exclusive")
+    if eval_args.parity_mode != "off" and (
+        eval_args.command is not None or eval_args.command_sweep
+    ):
+        parser.error("command evaluation options are not supported with --parity_mode")
+    eval_args.seeds_explicit = eval_args.seeds is not None
+    if eval_args.seeds is None:
+        eval_args.seeds = DEFAULT_SEEDS
     sys.argv = [sys.argv[0], *remaining]
     return eval_args
 
@@ -238,6 +289,21 @@ def _default_output_dir(resume_path):
 
 def _make_trials(eval_args, legged_args):
     seed = 1 if legged_args.seed is None else int(legged_args.seed)
+    command = FIXED_COMMAND if eval_args.command is None else eval_args.command
+    if eval_args.command_sweep:
+        # Keep the default sweep at 21 trials; repeat only for explicit --seeds.
+        command_seeds = eval_args.seeds if eval_args.seeds_explicit else (seed,)
+        return generate_sweep(
+            profile=eval_args.profile,
+            directions=(eval_args.direction,),
+            betas=(eval_args.beta,),
+            seeds=command_seeds,
+            hold_durations=(eval_args.hold_duration,),
+            pulse_duration_s=eval_args.pulse_duration,
+            ramp_up_s=eval_args.ramp_up,
+            ramp_down_s=eval_args.ramp_down,
+            commands=DEFAULT_COMMAND_SWEEP,
+        )
     if eval_args.sweep:
         return generate_sweep(
             profile=eval_args.profile,
@@ -248,6 +314,7 @@ def _make_trials(eval_args, legged_args):
             pulse_duration_s=eval_args.pulse_duration,
             ramp_up_s=eval_args.ramp_up,
             ramp_down_s=eval_args.ramp_down,
+            commands=(command,),
         )
     return [
         make_single_trial(
@@ -259,6 +326,7 @@ def _make_trials(eval_args, legged_args):
             hold_duration_s=eval_args.hold_duration,
             ramp_up_s=eval_args.ramp_up,
             ramp_down_s=eval_args.ramp_down,
+            command=command,
         )
     ]
 
@@ -274,6 +342,12 @@ def _print_trial_header(condition, no_force):
     else:
         print(f"pulse={condition.pulse_duration_s:.3f}s")
     print(f"seed={condition.seed}")
+    print(
+        "[COMMAND] "
+        f"vx={condition.command[0]:.3f} "
+        f"vy={condition.command[1]:.3f} "
+        f"yaw_rate={condition.command[2]:.3f}"
+    )
     print(f"no_force={bool(no_force)}")
     print("=" * 60)
 
@@ -370,7 +444,7 @@ def _print_reward_debug(env, policy_step):
     )
 
 
-def _reset_for_trial(env, seed, parity_debug=False):
+def _reset_for_trial(env, seed, command, parity_debug=False):
     set_seed(int(seed))
     if env.clean_eval_trace_enabled:
         env.end_trace()
@@ -379,7 +453,7 @@ def _reset_for_trial(env, seed, parity_debug=False):
     if hasattr(env, "reset_evaluation_trial_state"):
         env.reset_evaluation_trial_state(clear_actor_history=True)
     env.reset()
-    obs = set_fixed_evaluation_command(env, FIXED_COMMAND)
+    obs = set_fixed_evaluation_command(env, command)
     env.clear_summary_snapshot(env_id=0)
     return obs
 
@@ -453,14 +527,19 @@ def quat_rotate_for_eval(env, local, env_id):
 
 def run_trial(env, policy, condition, checkpoint, eval_args):
     _print_trial_header(condition, eval_args.no_force)
-    obs = _reset_for_trial(env, condition.seed, parity_debug=eval_args.parity_debug)
+    obs = _reset_for_trial(
+        env,
+        condition.seed,
+        condition.command,
+        parity_debug=eval_args.parity_debug,
+    )
     previous_pelvis_yaw = None
     policy_dt = None
     if eval_args.heading_debug:
         # Evaluator-local state: reset separately for every trial, immediately after reset.
         previous_pelvis_yaw = env.yaw[0].detach().clone()
         policy_dt = float(env.dt)
-    assert_startup_compatibility(env, obs, expected_command=FIXED_COMMAND)
+    assert_startup_compatibility(env, obs, expected_command=condition.command)
     if eval_args.parity_debug:
         print_initial_state("evaluate_after_trial_reset", env, obs)
 
@@ -474,6 +553,9 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
                 "profile": condition.profile,
                 "direction": condition.direction,
                 "seed": condition.seed,
+                "command_vx": condition.command[0],
+                "command_vy": condition.command[1],
+                "command_yaw_rate": condition.command[2],
                 "hold_duration_s": condition.hold_duration_s,
                 "pulse_duration_s": condition.pulse_duration_s,
                 "ramp_up_s": condition.ramp_up_s,
@@ -637,6 +719,11 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
         env=env,
         failure=failure,
     )
+    summary.update(
+        command_vx=condition.command[0],
+        command_vy=condition.command[1],
+        command_yaw_rate=condition.command[2],
+    )
     print("[RESULT]")
     print(f"physical_failure={'yes' if failure['physical_failure'] else 'no'}")
     print(f"termination_reason={summary['termination_reason']}")
@@ -677,7 +764,14 @@ def play(eval_args, legged_args):
     print("[CONFIG] evaluator env inherits directly from clean carrybox.LeggedRobot")
     print("[CONFIG] training uses dynamic carry-command resampling")
     print("[CONFIG] evaluator disables carry-command resampling")
-    print(f"[CONFIG] evaluator fixed command={FIXED_COMMAND}")
+    if eval_args.command_sweep:
+        print(
+            "[CONFIG] evaluator static command sweep "
+            f"conditions={len(DEFAULT_COMMAND_SWEEP)}"
+        )
+    else:
+        command = FIXED_COMMAND if eval_args.command is None else eval_args.command
+        print(f"[CONFIG] evaluator fixed command={command}")
 
     ppo_runner, train_cfg = task_registry.make_alg_runner(
         env=env,

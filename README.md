@@ -120,6 +120,10 @@ To play the final trained checkpoint:
 ```bash
 python legged_gym/scripts/play.py --task carrybox --resume_path [ckpt_path]
 ```
+For play actor only, if add PI in obs
+```bash
+python legged_gym/legged_gym/scripts/play_ActorOnly.py --task carrybox --resume_path legged_gym/logs/
+```
 
 ### Other Tasks
 

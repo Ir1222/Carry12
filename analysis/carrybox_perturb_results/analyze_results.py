@@ -402,8 +402,6 @@ def markdown_table(df: pd.DataFrame, columns: list[str]) -> str:
 
 def write_report(summary: pd.DataFrame, joined: pd.DataFrame, tables: dict[str, pd.DataFrame]) -> None:
     overview = tables["overview.csv"].copy()
-    smooth_trace = tables["smooth_trace_overview.csv"].copy()
-    smooth_pair = summary[summary["profile"].eq("smooth_hold")]
 
     official = overview[overview["policy"].eq("official")].iloc[0]
     pi = overview[overview["policy"].eq("pi")].iloc[0]
@@ -416,23 +414,6 @@ def write_report(summary: pd.DataFrame, joined: pd.DataFrame, tables: dict[str, 
         "success": pi["task_success_rate"] - official["task_success_rate"],
         "scheduled": pi["force_scheduled_rate"] - official["force_scheduled_rate"],
     }
-
-    smooth_by_hold = smooth_pair.groupby(["policy_label", "hold_duration"])[
-        ["physical_failure", "contact_loss", "final_confirmed_carry", "scheduled_force"]
-    ].mean().reset_index()
-
-    smooth_trace_cn = smooth_trace.rename(columns={
-        "policy_label": "策略",
-        "trials": "trial 数",
-        "force_scheduled_rate": "成功施加外力比例",
-        "physical_failure_rate": "物理失败率",
-        "contact_loss_rate": "接触丢失率",
-        "final_confirmed_carry_rate": "最终确认搬运率",
-        "median_force_onset_steps": "外力触发中位步数",
-        "median_peak_rel_speed": "峰值手箱相对速度中位数",
-        "median_both_contact_response_rate": "双手接触响应率中位数",
-        "median_mean_resistive_force_N": "平均抗扰手力中位数(N)",
-    })
 
     report = f"""# CarryBox 扰动评估数据分析报告
 
@@ -467,6 +448,64 @@ def write_report(summary: pd.DataFrame, joined: pd.DataFrame, tables: dict[str, 
 
 结论：PI 的主要收益是“更容易进入/维持搬运状态，并减少跌倒/重置类物理失败”；但它还没有真正解决 sustained external force 下的双手稳定夹持问题。
 
+## 指标判定条件
+
+下面四个结果指标来自 `experiments/carrybox_perturb_debug/evaluation/metrics.py`。它们衡量的是不同层级的行为，不是互斥的成功/失败标签。同一条 trial 可以同时发生接触丢失、最终恢复搬运且没有物理失败。
+
+### `physical_failure`：环境终止
+
+在 `evaluate.py` 的 rollout 中，只要环境返回 `done=True`，该 trial 就记为 `physical_failure=1`。触发 `done` 的条件来自 `carrybox_PI.py::check_termination()`，主要包括：
+
+- 指定终止碰撞部位的净接触力超过 `10 N`；
+- episode 超时；
+- 头部高度低于 `0.6 m`，或 base 高度低于 `0.2 m`；
+- `|roll| > 0.5 rad`，或 `|pitch| > 1.1 rad`；
+- 指定刚体的水平速度超过 `3.0 m/s`；
+- 任一 hip-yaw 刚体高度低于 `0.15 m`；
+- 启用箱体终止条件时，箱体严重倾倒。
+
+因此 `physical_failure` 更准确地表示“环境终止”，不只表示机器人摔倒。当前实现也把 `timeout` 计为物理失败。图中的物理失败率是 `physical_failure` 这个 0/1 字段在对应 trial 集合中的平均值，越低越好。
+
+### `contact_loss`：响应窗口内曾丢失任一只手接触
+
+评估器只在外力已经开始后的 `FORCE` 和 `POST_FORCE` 阶段采样左右手接触。每个 policy step 分别计算左右手刚体的净接触力范数：
+
+`left_contact = ||F_left|| > 1.0 N`
+
+`right_contact = ||F_right|| > 1.0 N`
+
+只要响应窗口内存在一个采样点满足 `left_contact=0` 或 `right_contact=0`，整条 trial 就记为 `contact_loss=1`。所以它是严格的双手持续接触指标：单手短暂脱离后重新接触，仍然算发生过 contact loss；但这不等于箱子一定掉落，也不等于机器人一定终止。
+
+这里使用的是手部刚体的 simulator net contact force，并没有进一步分离具体接触对象。因此它主要表示“手部有效接触是否中断”，不是严格的手-箱 pairwise 接触测量。越低越好。
+
+### `final_confirmed_carry`：响应结束时仍满足有效搬运状态
+
+该字段读取 `FORCE/POST_FORCE` 响应窗口最后一个采样点上的 `env.confirmed_carry_buf`。`confirmed_carry=1` 必须同时满足：
+
+- 箱子底部相对平台顶面或支撑面的净空高度大于 `0.05 m`；
+- 箱子相对机器人 base 的线速度小于 `1.0 m/s`；
+- 箱子角速度小于 `3.0 rad/s`；
+- 左右手净接触力都大于 `1.0 N`。
+
+也就是：`confirmed_carry = lifted AND motion_stable AND left_contact AND right_contact`。
+
+因此 `final_confirmed_carry=1` 表示扰动响应结束时，箱子仍被抬起、没有相对机器人剧烈运动或旋转，并且双手都有有效接触。它不要求箱子已经到达目标位置，也只检查最后一个采样点，不要求连续稳定若干步。若 trial 在施力前终止、没有响应采样，该字段默认记为 `0`。越高越好。
+
+### `task_success`：原始 CarryBox 目标完成
+
+评估配置使用 `env.test=True`。在测试模式下，`task_success=1` 要同时满足：
+
+- `object2goal_dist_xyz < 0.1 m`，即箱子与三维目标点的距离小于 `10 cm`；
+- `||projected_gravity_box_xy|| < 0.2`，即箱体倾斜程度在允许范围内。
+
+它不要求双手始终保持接触，也不要求最终仍处于 `confirmed_carry`。所以它衡量的是原始 CarryBox 的到达/放置目标能力，而不是专门的抗扰恢复成功。越高越好。
+
+### 比例统计的共同口径
+
+`01_outcome_rates.png` 对每种 policy 的全部 trial 求 0/1 平均值；`02_beta_curves.png` 则先按 `beta` 分组，再对不同方向、seed 和 hold duration 下的 trial 求平均。
+
+需要特别注意：没有达到 `confirmed_carry`、因而没有真正施加外力的 trial 也包含在总分母中。此时因为没有响应采样，`contact_loss` 默认是 `0`，而 `final_confirmed_carry` 默认是 `0`。这会压低总体接触丢失率，因此解释 `contact_loss` 时必须同时参考 `Force scheduled rate`；若要单独评价受力后的抓持鲁棒性，应另外计算“仅在成功施力 trial 中的条件接触丢失率”。
+
 ## 每张图怎么看
 
 ### 1. `01_outcome_rates.png`：三种策略的总体结果柱状图
@@ -494,51 +533,6 @@ def write_report(summary: pd.DataFrame, joined: pd.DataFrame, tables: dict[str, 
 四个子图分别是物理失败率、接触丢失率、最终确认搬运率、原任务成功率。纵轴都是比例。理论上 beta 越大，外力越强，性能可能越差；但实际曲线不是单调的，说明主导失败的不只是外力大小，还包括施力时刻、当时步态相位、箱体姿态、双手接触几何和 policy 当前动作。
 
 PI 在大多数 beta 上物理失败率低于 official，最终确认搬运率高于 official；但 contact loss 仍然在多个 beta 上很高。
-
-### 3. `03_heatmap_failure.png`：不同方向和 beta 下的物理失败热力图
-
-![物理失败热力图](03_heatmap_failure.png)
-
-这张图只比较 `smooth_hold` 下的 `official` 和 `pi`。行是外力方向，列是 beta，格子里的数字是该条件下的平均物理失败率。颜色越偏高值颜色，失败率越高；颜色越偏低值颜色，失败率越低。
-
-它回答的问题是：哪个方向、哪个外力强度最容易让机器人失败。
-
-可以看到 PI 的失败热区比 official 少一些，说明 PI 的扰动后 gross stability 更好，也就是更不容易直接摔倒、低头、倾倒或触发 reset。
-
-### 4. `03_heatmap_contact_loss.png`：不同方向和 beta 下的接触丢失热力图
-
-![接触丢失热力图](03_heatmap_contact_loss.png)
-
-这张图的横纵轴和上一张一样，但指标换成了 contact loss。它回答的问题是：哪个方向/强度更容易导致单手或双手与箱体接触不稳定。
-
-这张图和 failure heatmap 要分开看。物理不失败不代表手一直稳定夹住箱体。PI 的物理失败率改善了，但 contact loss 仍然高，说明 PI 更像是学会了“别摔、还能维持搬运状态”，还没完全学会“外力来时保持可靠双手力闭合”。
-
-### 5. `04_hold_duration_effect.png`：smooth-hold 持续时间的影响
-
-![hold duration 影响](04_hold_duration_effect.png)
-
-横轴是 `smooth_hold` 外力保持平台段时长：0.5 s、1.0 s、2.0 s。纵轴仍然是比例。图里比较 official 和 PI 在不同持续时间下的物理失败率、接触丢失率、最终确认搬运率。
-
-如果一个 policy 真正具备 sustained force 抗扰能力，那么 hold duration 变长时不应该明显崩掉。这里曲线也不是严格单调的，说明试验结果受到状态分布影响。总体上 PI 在不同 hold duration 下的 final confirmed-carry 都更高，但 contact loss 仍然没有根本解决。
-
-### 6. `05_trace_response_boxplots.png`：逐物理步 trace 派生的响应指标箱线图
-
-![trace 响应箱线图](05_trace_response_boxplots.png)
-
-这张图只统计已经成功施加外力的 trial，因为没有进入 `confirmed_carry` 的 trial 不会有真实外力响应 trace。
-
-箱线图的中线是中位数，箱体表示中间 50% 数据范围，须表示分布范围；为了看主体分布，离群点没有画出来。
-
-四个子图含义是：
-
-- `Force-onset from trial start`：从 trial trace 开始到外力触发用了多少 policy step。数值越大，说明 policy 更晚才稳定到可施加外力的 confirmed carry。
-- `Peak hand-box rel speed`：响应窗口内手和箱体相对速度峰值，越低越好。PI 的中位数低于 official，说明在成功施加外力的 trial 中，PI 的手箱相对滑动速度主体更低。
-- `Both-contact response rate`：外力响应窗口中双手同时接触箱体的比例，越高越好。PI 中位数更高，说明 trace 层面双手接触维持得更好。
-- `Mean resistive hand force`：手部沿外力反方向提供的平均抗扰力估计。这个值不是越大越好；过小可能表示没有有效抗扰，过大可能表示接触冲击或不稳定。需要和 contact、relative speed 一起看。
-
-trace 层面的 smooth-hold 汇总如下：
-
-{markdown_table(smooth_trace_cn, ['策略', 'trial 数', '成功施加外力比例', '物理失败率', '接触丢失率', '最终确认搬运率', '外力触发中位步数', '峰值手箱相对速度中位数', '双手接触响应率中位数', '平均抗扰手力中位数(N)'])}
 
 ## 结合具体代码的解释
 
@@ -594,10 +588,6 @@ PI policy 的方向是有效的，但目前效果偏向 gross stability 和 carr
 - `smooth_trace_overview.csv`：smooth-hold trace 指标总览。
 - `01_outcome_rates.png`：总体结果柱状图。
 - `02_beta_curves.png`：beta 强度曲线。
-- `03_heatmap_failure.png`：方向 x beta 的物理失败热力图。
-- `03_heatmap_contact_loss.png`：方向 x beta 的接触丢失热力图。
-- `04_hold_duration_effect.png`：外力 hold duration 影响图。
-- `05_trace_response_boxplots.png`：trace 级响应箱线图。
 """
     (OUT_DIR / "carrybox_perturb_analysis.md").write_text(report, encoding="utf-8")
 
@@ -618,9 +608,6 @@ def main() -> None:
 
     plot_bar_rates(summary)
     plot_beta_curves(summary)
-    plot_heatmaps(summary)
-    plot_hold_effect(summary)
-    plot_trace_response(joined)
     write_report(summary, joined, tables)
 
     print(f"Wrote analysis artifacts to {OUT_DIR}")
