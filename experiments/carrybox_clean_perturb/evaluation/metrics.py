@@ -91,7 +91,7 @@ def _phase_mean(samples, phase, key):
     return _mean(row[key] for row in samples if row.get("phase") == phase)
 
 
-def summarize_trial(condition, checkpoint, signature, samples, env, failure):
+def summarize_trial(condition, checkpoint, signature, samples, env, termination):
     final_sample = samples[-1] if samples else {}
     force_samples = [row for row in samples if row.get("phase") == "force"]
     post_samples = [row for row in samples if row.get("phase") == "post_force"]
@@ -108,11 +108,7 @@ def summarize_trial(condition, checkpoint, signature, samples, env, failure):
     ]
     if not yaw_drift_samples:
         yaw_drift_samples = nominal_samples
-    contact_loss = any(
-        row.get("left_hand_contact_proxy", 0) == 0
-        or row.get("right_hand_contact_proxy", 0) == 0
-        for row in force_samples + post_samples
-    )
+    response_samples = force_samples + post_samples
     max_rel_speed = max(
         (row.get("max_hand_box_relative_speed", 0.0) for row in samples),
         default=float("nan"),
@@ -125,6 +121,25 @@ def summarize_trial(condition, checkpoint, signature, samples, env, failure):
     def bool_scalar(name):
         value = env.summary_scalar(name, env_id=0) if hasattr(env, "summary_scalar") else getattr(env, name)[0]
         return int(bool(value.item()))
+
+    force_scheduled = int(scalar("clean_eval_event_count_buf") > 0)
+    contact_loss = (
+        int(
+            any(
+                row.get("left_hand_contact_proxy", 0) == 0
+                or row.get("right_hand_contact_proxy", 0) == 0
+                for row in response_samples
+            )
+        )
+        if force_scheduled and response_samples
+        else float("nan")
+    )
+    humanoid_failure_reason = env.summary_reason(
+        "clean_eval_humanoid_failure_reason", env_id=0
+    )
+    box_failure_reason = env.summary_reason(
+        "clean_eval_box_failure_reason", env_id=0
+    )
 
     if bool(env.clean_eval_has_terminal_snapshot[0].item()):
         final_confirmed_carry = int(env.clean_eval_terminal_confirmed_carry_buf[0].item())
@@ -146,11 +161,17 @@ def summarize_trial(condition, checkpoint, signature, samples, env, failure):
         "peak_force_N": scalar("clean_eval_peak_force_N"),
         "impulse_Ns": scalar("clean_eval_impulse_Ns"),
         "force_duration": scalar("clean_eval_force_duration_s"),
-        "physical_failure": int(bool(failure["physical_failure"])),
-        "termination_reason": failure["termination_reason"],
+        "humanoid_failure": bool_scalar("clean_eval_humanoid_failure_buf"),
+        "humanoid_failure_reason": humanoid_failure_reason,
+        "box_failure": bool_scalar("clean_eval_box_failure_buf"),
+        "box_failure_reason": box_failure_reason,
+        "timeout": bool_scalar("clean_eval_timeout_buf"),
+        "carry_achieved": bool_scalar("clean_eval_carry_achieved_buf"),
+        "force_scheduled": force_scheduled,
+        "termination_reason": termination["termination_reason"],
         "left_hand_contact_proxy": final_sample.get("left_hand_contact_proxy", 0),
         "right_hand_contact_proxy": final_sample.get("right_hand_contact_proxy", 0),
-        "contact_loss": int(contact_loss),
+        "contact_loss": contact_loss,
         "max_hand_box_relative_speed": max_rel_speed,
         "box_displacement_along_force": final_sample.get(
             "box_displacement_along_force", float("nan")
@@ -171,8 +192,16 @@ def summarize_trial(condition, checkpoint, signature, samples, env, failure):
             "robot_velocity_along_force", float("nan")
         ),
         "final_confirmed_carry": final_confirmed_carry,
-        "recovery_success": bool_scalar("clean_eval_recovery_success_buf"),
-        "recovery_time": scalar("clean_eval_recovery_time_s"),
+        "recovery_success": (
+            bool_scalar("clean_eval_recovery_success_buf")
+            if force_scheduled
+            else float("nan")
+        ),
+        "recovery_time": (
+            scalar("clean_eval_recovery_time_s")
+            if force_scheduled
+            else float("nan")
+        ),
         "vx_tracking_error_nominal_mean": _mean(
             row["vx_tracking_error"] for row in nominal_samples
         ),

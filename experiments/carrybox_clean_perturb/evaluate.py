@@ -284,7 +284,9 @@ def _checkpoint_label(path):
 
 
 def _default_output_dir(resume_path):
-    return os.path.join(EXPERIMENT_DIR, "results", _checkpoint_label(resume_path))
+    return os.path.join(
+        EXPERIMENT_DIR, "results", _checkpoint_label(resume_path), "metrics_v2"
+    )
 
 
 def _make_trials(eval_args, legged_args):
@@ -565,17 +567,18 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
 
     pre_force_steps = _phase_steps(eval_args.pre_force_delay, env.dt)
     post_force_steps = _phase_steps(eval_args.post_force_observation, env.dt)
-    phase = "WAIT_CARRY"
+    phase = "wait_carry"
     pre_count = 0
     post_count = 0
     force_info = None
     force_start = {
         "box_pos": env.box_states[0, 0:3].detach().clone(),
         "robot_pos": env.root_states[0, 0:3].detach().clone(),
+        "robot_yaw": float(env.yaw[0].reshape(-1)[0].item()),
     }
     direction_world_t = _direction_world_from_box(env, condition.direction)
     samples = []
-    failure = {"physical_failure": False, "termination_reason": ""}
+    termination = {"termination_reason": ""}
     printed_confirmed = False
 
     if eval_args.no_force:
@@ -613,8 +616,7 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
             reason = env.clean_eval_last_termination_reason[0]
             if not reason and termination_ids.numel() > 0:
                 reason = "termination"
-            failure["physical_failure"] = True
-            failure["termination_reason"] = reason or "done"
+            termination["termination_reason"] = reason or "done"
             break
 
         if eval_args.heading_debug:
@@ -631,21 +633,21 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
 
         samples.append(sample_policy_metrics(env, direction_world_t, force_start, phase))
 
-        if phase == "WAIT_CARRY" and bool(env.confirmed_carry_buf[0].item()):
+        if phase == "wait_carry" and bool(env.confirmed_carry_buf[0].item()):
             print("[STATE] WAIT_CARRY -> CONFIRMED_CARRY")
             printed_confirmed = True
             if eval_args.no_force:
-                phase = "CONFIRMED_CARRY"
+                phase = "confirmed_carry"
             else:
                 print("[STATE] CONFIRMED_CARRY -> PRE_FORCE")
-                phase = "PRE_FORCE"
+                phase = "pre_force"
                 pre_count = 0
                 env.set_trace_phase("pre_force")
 
-        elif phase == "PRE_FORCE":
+        elif phase == "pre_force":
             if not bool(env.confirmed_carry_buf[0].item()):
                 print("[STATE] PRE_FORCE -> WAIT_CARRY")
-                phase = "WAIT_CARRY"
+                phase = "wait_carry"
                 pre_count = 0
                 env.set_trace_phase("wait_carry")
             else:
@@ -654,6 +656,7 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
                     force_start = {
                         "box_pos": env.box_states[0, 0:3].detach().clone(),
                         "robot_pos": env.root_states[0, 0:3].detach().clone(),
+                        "robot_yaw": float(env.yaw[0].reshape(-1)[0].item()),
                     }
                     env.set_force_start_reference(env_id=0)
                     force_info = env.schedule_evaluation_force(
@@ -689,19 +692,19 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
                     print("[ASSERT] force acts at box COM via rigid-body force tensor")
                     print("[ASSERT] GLOBAL_SPACE is used")
                     print("[ASSERT] force is applied before every gym.simulate substep")
-                    phase = "FORCE"
+                    phase = "force"
 
-        elif phase == "FORCE":
+        elif phase == "force":
             if int(env.clean_eval_remaining_physics_steps[0].item()) == 0:
                 env.set_trace_phase("post_force")
                 print("[STATE] FORCE -> POST_FORCE")
                 print("[FORCE OFF]")
                 print(f"duration={float(env.clean_eval_force_duration_s[0].item()):.6f}s")
                 print(f"impulse={float(env.clean_eval_impulse_Ns[0].item()):.6f}Ns")
-                phase = "POST_FORCE"
+                phase = "post_force"
                 post_count = 0
 
-        elif phase == "POST_FORCE":
+        elif phase == "post_force":
             post_count += 1
             if post_count >= post_force_steps:
                 print("[STATE] POST_FORCE -> END")
@@ -717,7 +720,7 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
         signature=signature,
         samples=samples,
         env=env,
-        failure=failure,
+        termination=termination,
     )
     summary.update(
         command_vx=condition.command[0],
@@ -725,7 +728,13 @@ def run_trial(env, policy, condition, checkpoint, eval_args):
         command_yaw_rate=condition.command[2],
     )
     print("[RESULT]")
-    print(f"physical_failure={'yes' if failure['physical_failure'] else 'no'}")
+    print(f"humanoid_failure={summary['humanoid_failure']}")
+    print(f"humanoid_failure_reason={summary['humanoid_failure_reason']}")
+    print(f"box_failure={summary['box_failure']}")
+    print(f"box_failure_reason={summary['box_failure_reason']}")
+    print(f"timeout={summary['timeout']}")
+    print(f"carry_achieved={summary['carry_achieved']}")
+    print(f"force_scheduled={summary['force_scheduled']}")
     print(f"termination_reason={summary['termination_reason']}")
     print(f"contact_loss={summary['contact_loss']}")
     print(f"box_displacement_along_force={summary['box_displacement_along_force']}")

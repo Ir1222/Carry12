@@ -67,6 +67,8 @@ def apply_evaluation_config(
         max_events_per_episode=1,
         flush_start_platform=not bool(play_nominal_parity),
         box_vertical_clearance=0.01,
+        box_drop_ground_clearance=0.03,
+        box_drop_confirm_s=0.10,
         debug_draw_force=True,
         debug_force_draw_scale_m_per_N=1.0,
         debug_force_bundle_line_count=20,

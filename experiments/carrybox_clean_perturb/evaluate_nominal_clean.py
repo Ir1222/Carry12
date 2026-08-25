@@ -142,6 +142,7 @@ def _default_output_dir(resume_path):
         "results",
         "nominal_clean",
         _checkpoint_label(resume_path),
+        "metrics_v2",
     )
 
 
@@ -264,7 +265,7 @@ def run_nominal_trial(env, policy, condition, checkpoint, eval_args):
         "robot_yaw": _current_yaw(env),
     }
     direction_world_t = _direction_world_from_box(env, condition.direction)
-    failure = {"physical_failure": False, "termination_reason": ""}
+    termination = {"termination_reason": ""}
     printed_confirmed = False
 
     rollout_steps = int(env.max_episode_length) + post_force_steps + 10
@@ -275,8 +276,7 @@ def run_nominal_trial(env, policy, condition, checkpoint, eval_args):
             reason = env.clean_eval_last_termination_reason[0]
             if not reason and termination_ids.numel() > 0:
                 reason = "termination"
-            failure["physical_failure"] = True
-            failure["termination_reason"] = reason or "done"
+            termination["termination_reason"] = reason or "done"
             break
 
         samples.append(sample_policy_metrics(env, direction_world_t, force_start, phase.lower()))
@@ -378,10 +378,12 @@ def run_nominal_trial(env, policy, condition, checkpoint, eval_args):
         signature=signature,
         samples=samples,
         env=env,
-        failure=failure,
+        termination=termination,
     )
     print("[RESULT]")
-    print(f"physical_failure={'yes' if failure['physical_failure'] else 'no'}")
+    print(f"humanoid_failure={summary['humanoid_failure']}")
+    print(f"box_failure={summary['box_failure']}")
+    print(f"timeout={summary['timeout']}")
     print(f"termination_reason={summary['termination_reason']}")
     print(f"final_confirmed_carry={summary['final_confirmed_carry']}")
     print(f"command={eval_args.command}")

@@ -12,6 +12,11 @@ from isaacgym.torch_utils import quat_rotate
 from legged_gym.envs.g1.carrybox import LeggedRobot as CarryBoxBase
 
 from evaluation.force_profiles import half_sine_scale, smooth_hold_scale
+from evaluation.outcomes import (
+    box_instability_masks,
+    humanoid_failure_masks,
+    update_box_drop_state,
+)
 
 
 class LeggedRobot(CarryBoxBase):
@@ -195,6 +200,21 @@ class LeggedRobot(CarryBoxBase):
         self.clean_carry_condition_buf = torch.zeros(n, dtype=torch.bool, device=device)
         self.confirmed_carry_buf = torch.zeros(n, dtype=torch.bool, device=device)
         self.confirmed_carry_streak = torch.zeros(n, dtype=torch.long, device=device)
+        self.clean_eval_carry_achieved_buf = torch.zeros(
+            n, dtype=torch.bool, device=device
+        )
+        self.clean_eval_humanoid_failure_buf = torch.zeros(
+            n, dtype=torch.bool, device=device
+        )
+        self.clean_eval_box_failure_buf = torch.zeros(
+            n, dtype=torch.bool, device=device
+        )
+        self.clean_eval_timeout_buf = torch.zeros(n, dtype=torch.bool, device=device)
+        self.clean_eval_box_drop_streak = torch.zeros(
+            n, dtype=torch.long, device=device
+        )
+        self.clean_eval_humanoid_failure_reason = [""] * n
+        self.clean_eval_box_failure_reason = [""] * n
         self.clean_eval_recovery_active_buf = torch.zeros(n, dtype=torch.bool, device=device)
         self.clean_eval_recovery_success_buf = torch.zeros(n, dtype=torch.bool, device=device)
         self.clean_eval_recovery_done_buf = torch.zeros(n, dtype=torch.bool, device=device)
@@ -224,6 +244,23 @@ class LeggedRobot(CarryBoxBase):
         self.clean_eval_terminal_confirmed_carry_buf = torch.zeros(
             n, dtype=torch.bool, device=device
         )
+        self.clean_eval_terminal_carry_achieved_buf = torch.zeros(
+            n, dtype=torch.bool, device=device
+        )
+        self.clean_eval_terminal_humanoid_failure_buf = torch.zeros(
+            n, dtype=torch.bool, device=device
+        )
+        self.clean_eval_terminal_box_failure_buf = torch.zeros(
+            n, dtype=torch.bool, device=device
+        )
+        self.clean_eval_terminal_timeout_buf = torch.zeros(
+            n, dtype=torch.bool, device=device
+        )
+        self.clean_eval_terminal_event_count_buf = torch.zeros(
+            n, dtype=torch.long, device=device
+        )
+        self.clean_eval_terminal_humanoid_failure_reason = [""] * n
+        self.clean_eval_terminal_box_failure_reason = [""] * n
 
         assert self.clean_eval_force_tensor.shape == self.contact_forces.shape
         assert int(self.box_rigid_body_index) < self.contact_forces.shape[1]
@@ -312,6 +349,13 @@ class LeggedRobot(CarryBoxBase):
                 self.clean_eval_terminal_recovery_success_buf[env_id] = False
                 self.clean_eval_terminal_recovery_time_s[env_id] = float("nan")
                 self.clean_eval_terminal_confirmed_carry_buf[env_id] = False
+                self.clean_eval_terminal_carry_achieved_buf[env_id] = False
+                self.clean_eval_terminal_humanoid_failure_buf[env_id] = False
+                self.clean_eval_terminal_box_failure_buf[env_id] = False
+                self.clean_eval_terminal_timeout_buf[env_id] = False
+                self.clean_eval_terminal_event_count_buf[env_id] = 0
+                self.clean_eval_terminal_humanoid_failure_reason[env_id] = ""
+                self.clean_eval_terminal_box_failure_reason[env_id] = ""
 
     def _apply_box_external_force(self):
         cfg = self.cfg.clean_perturbation
@@ -469,6 +513,7 @@ class LeggedRobot(CarryBoxBase):
     def _post_physics_step_callback(self):
         super()._post_physics_step_callback()
         self._update_confirmed_carry_detector()
+        self._update_outcome_detectors()
         self._update_recovery_state()
 
     def _update_confirmed_carry_detector(self):
@@ -511,6 +556,94 @@ class LeggedRobot(CarryBoxBase):
             "left_hand_contact_proxy_fraction": self.left_hand_contact_proxy.float().mean(),
             "right_hand_contact_proxy_fraction": self.right_hand_contact_proxy.float().mean(),
         }
+
+    @staticmethod
+    def _append_reason(reason_list, reason):
+        tokens = [token for token in reason_list.split("|") if token]
+        if reason not in tokens:
+            tokens.append(reason)
+        return "|".join(tokens)
+
+    def _latch_reasons(self, mask, failure_buf, reasons, reason):
+        if not torch.any(mask):
+            return
+        failure_buf[mask] = True
+        for env_id_tensor in torch.nonzero(mask, as_tuple=False).flatten():
+            env_id = int(env_id_tensor.item())
+            reasons[env_id] = self._append_reason(reasons[env_id], reason)
+
+    def _update_outcome_detectors(self):
+        """Latch evaluator-only humanoid and box outcomes once per policy step."""
+        cfg = self.cfg.clean_perturbation
+        box_bottom_z = self.box_states[:, 2] - self._box_size[:, 2] / 2.0
+        ground_z = self.env_origins[:, 2]
+        confirm_steps = max(
+            1, int(round(float(cfg.box_drop_confirm_s) / float(self.dt)))
+        )
+        (
+            self.clean_eval_carry_achieved_buf[:],
+            self.clean_eval_box_failure_buf[:],
+            self.clean_eval_box_drop_streak[:],
+            newly_dropped,
+        ) = update_box_drop_state(
+            self.clean_eval_carry_achieved_buf,
+            self.clean_eval_box_failure_buf,
+            self.clean_eval_box_drop_streak,
+            self.confirmed_carry_buf,
+            box_bottom_z,
+            ground_z,
+            cfg.box_drop_ground_clearance,
+            confirm_steps,
+        )
+        self._latch_reasons(
+            newly_dropped,
+            self.clean_eval_box_failure_buf,
+            self.clean_eval_box_failure_reason,
+            "dropped_to_ground",
+        )
+
+        humanoid_masks = humanoid_failure_masks(
+            self.rigid_body_states[:, self.head_index, 2],
+            self.root_states[:, 2],
+            self.roll,
+            self.pitch,
+            self.rigid_body_states[:, self.hip_yaw_indices, 2],
+        )
+        for reason, mask in humanoid_masks.items():
+            self._latch_reasons(
+                mask,
+                self.clean_eval_humanoid_failure_buf,
+                self.clean_eval_humanoid_failure_reason,
+                reason,
+            )
+
+        if self.termination_contact_indices.numel() > 0:
+            termination_contact = torch.any(
+                torch.linalg.vector_norm(
+                    self.contact_forces[:, self.termination_contact_indices, :], dim=-1
+                )
+                > 10.0,
+                dim=1,
+            )
+            self._latch_reasons(
+                termination_contact,
+                self.clean_eval_humanoid_failure_buf,
+                self.clean_eval_humanoid_failure_reason,
+                "termination_contact",
+            )
+
+        box_masks = box_instability_masks(
+            self.box_states[:, 7:9],
+            self.projected_gravity_box[:, 2],
+            self.box_cfg.box_termination,
+        )
+        for reason, mask in box_masks.items():
+            self._latch_reasons(
+                mask,
+                self.clean_eval_box_failure_buf,
+                self.clean_eval_box_failure_reason,
+                reason,
+            )
 
     def _update_recovery_state(self):
         event_finished = (
@@ -566,20 +699,15 @@ class LeggedRobot(CarryBoxBase):
             reasons = []
             if bool(self.time_out_buf[env_id].item()):
                 reasons.append("timeout")
-            if bool((self.rigid_body_states[env_id, self.head_index, 2] < 0.6).item()):
-                reasons.append("head_low")
-            if bool((self.root_states[env_id, 2] < 0.2).item()):
-                reasons.append("base_low")
-            if bool((torch.abs(self.roll[env_id]) > 0.5).item()) or bool(
-                (torch.abs(self.pitch[env_id]) > 1.1).item()
-            ):
-                reasons.append("base_tilt")
-            if hasattr(self, "hip_yaw_indices") and torch.any(
-                self.rigid_body_states[env_id, self.hip_yaw_indices, 2] < 0.15
-            ).item():
-                reasons.append("hip_low")
+            for reason in self.clean_eval_humanoid_failure_reason[env_id].split("|"):
+                if reason and reason not in reasons:
+                    reasons.append(reason)
+            for reason in self.clean_eval_box_failure_reason[env_id].split("|"):
+                if reason in ("box_unstable_speed", "box_tilt") and reason not in reasons:
+                    reasons.append(reason)
             if bool(self.reset_buf[env_id].item()) and not reasons:
                 reasons.append("other")
+            self.clean_eval_timeout_buf[env_id] = self.time_out_buf[env_id]
             self.clean_eval_last_termination_reason[env_id] = "|".join(reasons)
             self._snapshot_clean_eval_for_summary(env_id)
 
@@ -598,6 +726,25 @@ class LeggedRobot(CarryBoxBase):
         )
         self.clean_eval_terminal_confirmed_carry_buf[env_id] = (
             self.confirmed_carry_buf[env_id]
+        )
+        self.clean_eval_terminal_carry_achieved_buf[env_id] = (
+            self.clean_eval_carry_achieved_buf[env_id]
+        )
+        self.clean_eval_terminal_humanoid_failure_buf[env_id] = (
+            self.clean_eval_humanoid_failure_buf[env_id]
+        )
+        self.clean_eval_terminal_box_failure_buf[env_id] = (
+            self.clean_eval_box_failure_buf[env_id]
+        )
+        self.clean_eval_terminal_timeout_buf[env_id] = self.clean_eval_timeout_buf[env_id]
+        self.clean_eval_terminal_event_count_buf[env_id] = (
+            self.clean_eval_event_count_buf[env_id]
+        )
+        self.clean_eval_terminal_humanoid_failure_reason[env_id] = (
+            self.clean_eval_humanoid_failure_reason[env_id]
+        )
+        self.clean_eval_terminal_box_failure_reason[env_id] = (
+            self.clean_eval_box_failure_reason[env_id]
         )
 
     def _reset_clean_eval_buffers(self, env_ids):
@@ -626,6 +773,7 @@ class LeggedRobot(CarryBoxBase):
             "clean_eval_profile_id",
             "clean_eval_event_count_buf",
             "confirmed_carry_streak",
+            "clean_eval_box_drop_streak",
             "clean_eval_recovery_confirmed_streak",
             "clean_eval_recovery_elapsed_policy_steps",
         ):
@@ -635,12 +783,20 @@ class LeggedRobot(CarryBoxBase):
             "right_hand_contact_proxy",
             "clean_carry_condition_buf",
             "confirmed_carry_buf",
+            "clean_eval_carry_achieved_buf",
+            "clean_eval_humanoid_failure_buf",
+            "clean_eval_box_failure_buf",
+            "clean_eval_timeout_buf",
             "clean_eval_recovery_active_buf",
             "clean_eval_recovery_success_buf",
             "clean_eval_recovery_done_buf",
         ):
             getattr(self, name)[env_ids] = False
         self.clean_eval_recovery_time_s[env_ids] = float("nan")
+        for env_id_tensor in env_ids:
+            env_id = int(env_id_tensor.item())
+            self.clean_eval_humanoid_failure_reason[env_id] = ""
+            self.clean_eval_box_failure_reason[env_id] = ""
 
     def clear_summary_snapshot(self, env_id=0):
         self.clean_eval_has_terminal_snapshot[env_id] = False
@@ -650,8 +806,24 @@ class LeggedRobot(CarryBoxBase):
         self.clean_eval_terminal_recovery_success_buf[env_id] = False
         self.clean_eval_terminal_recovery_time_s[env_id] = float("nan")
         self.clean_eval_terminal_confirmed_carry_buf[env_id] = False
+        self.clean_eval_terminal_carry_achieved_buf[env_id] = False
+        self.clean_eval_terminal_humanoid_failure_buf[env_id] = False
+        self.clean_eval_terminal_box_failure_buf[env_id] = False
+        self.clean_eval_terminal_timeout_buf[env_id] = False
+        self.clean_eval_terminal_event_count_buf[env_id] = 0
+        self.clean_eval_terminal_humanoid_failure_reason[env_id] = ""
+        self.clean_eval_terminal_box_failure_reason[env_id] = ""
 
     def summary_scalar(self, name, env_id=0):
+        current = getattr(self, name)[env_id]
+        if not bool(self.clean_eval_has_terminal_snapshot[env_id].item()):
+            return current
+        terminal_name = name.replace("clean_eval_", "clean_eval_terminal_", 1)
+        if hasattr(self, terminal_name):
+            return getattr(self, terminal_name)[env_id]
+        return current
+
+    def summary_reason(self, name, env_id=0):
         current = getattr(self, name)[env_id]
         if not bool(self.clean_eval_has_terminal_snapshot[env_id].item()):
             return current
@@ -705,6 +877,9 @@ class LeggedRobot(CarryBoxBase):
             ]
             - self.box_states[env_id, 7:10]
         )
+        contact_threshold = float(self.cfg.clean_perturbation.contact_force_threshold)
+        left_contact = torch.linalg.vector_norm(left_force) > contact_threshold
+        right_contact = torch.linalg.vector_norm(right_force) > contact_threshold
 
         def vec(prefix, value):
             values = value.detach().cpu().tolist()
@@ -729,9 +904,20 @@ class LeggedRobot(CarryBoxBase):
             "elapsed_force_physics_steps": int(self.clean_eval_elapsed_physics_steps[env_id].item()),
             "remaining_force_physics_steps": int(self.clean_eval_remaining_physics_steps[env_id].item()),
             "actual_force_scale": float(self.clean_eval_actual_force_scale[env_id].item()),
-            "left_hand_contact_proxy": int(self.left_hand_contact_proxy[env_id].item()),
-            "right_hand_contact_proxy": int(self.right_hand_contact_proxy[env_id].item()),
+            "left_hand_contact_proxy": int(left_contact.item()),
+            "right_hand_contact_proxy": int(right_contact.item()),
             "confirmed_carry": int(self.confirmed_carry_buf[env_id].item()),
+            "carry_achieved": int(self.clean_eval_carry_achieved_buf[env_id].item()),
+            "humanoid_failure": int(self.clean_eval_humanoid_failure_buf[env_id].item()),
+            "box_failure": int(self.clean_eval_box_failure_buf[env_id].item()),
+            "box_drop_streak": int(self.clean_eval_box_drop_streak[env_id].item()),
+            "box_bottom_ground_clearance_m": float(
+                (
+                    self.box_states[env_id, 2]
+                    - self._box_size[env_id, 2] / 2.0
+                    - self.env_origins[env_id, 2]
+                ).item()
+            ),
             "left_hand_contact_proxy_norm_N": float(torch.linalg.vector_norm(left_force).item()),
             "right_hand_contact_proxy_norm_N": float(torch.linalg.vector_norm(right_force).item()),
             "max_hand_box_relative_speed": float(max(left_rel.item(), right_rel.item())),

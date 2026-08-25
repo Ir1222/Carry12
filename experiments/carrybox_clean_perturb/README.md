@@ -351,6 +351,14 @@ python experiments/carrybox_clean_perturb/evaluate.py \
   --output_dir experiments/carrybox_clean_perturb/results/single
 ```
 
+Without `--output_dir`, CSV v2 is written below the checkpoint result directory
+as `metrics_v2/summary.csv` with per-trial traces in `metrics_v2/traces/`.
+The v2 outcome columns are `humanoid_failure`, `box_failure`, `timeout`,
+`carry_achieved`, and `force_scheduled`; the old `physical_failure` column is
+not emitted. Response-only metrics such as `contact_loss` and recovery are NaN
+when no force event was scheduled. Existing CSV files with a different header
+are rejected instead of being appended with misaligned columns.
+
 Sweep:
 
 fix env setting, suitable for full testing

@@ -33,12 +33,25 @@ class EvaluationCsvLogger:
     def append_summary(self, row):
         if self._summary_fields is None:
             self._summary_fields = list(row.keys())
-            write_header = not os.path.exists(self.summary_path)
+            write_header = not os.path.exists(self.summary_path) or os.path.getsize(
+                self.summary_path
+            ) == 0
+            if not write_header:
+                with open(self.summary_path, newline="") as file:
+                    existing_fields = next(csv.reader(file), [])
+                if existing_fields != self._summary_fields:
+                    raise ValueError(
+                        "Existing summary.csv schema does not match evaluator CSV v2. "
+                        f"existing={existing_fields}, expected={self._summary_fields}. "
+                        "Use a new --output_dir."
+                    )
         else:
             write_header = False
-            for key in row:
-                if key not in self._summary_fields:
-                    self._summary_fields.append(key)
+            if list(row.keys()) != self._summary_fields:
+                raise ValueError(
+                    "Summary row schema changed during evaluation: "
+                    f"got={list(row.keys())}, expected={self._summary_fields}"
+                )
         with open(self.summary_path, "a", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=self._summary_fields)
             if write_header:
