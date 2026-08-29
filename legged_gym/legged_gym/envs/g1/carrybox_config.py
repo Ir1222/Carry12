@@ -152,8 +152,21 @@ class G1Cfg(LeggedRobotCfg):
         thickness = 0.01
 
         class box:
-            base_size = [0.3, 0.3, 0.25]
+            base_size = [0.35, 0.35, 0.30]
             use_random = True
+
+            use_mass_size_mixture = True
+            box_mixture_probabilities = [0.20, 0.60, 0.20]
+            box_mixture_scale_ranges = [
+                [[0.85, 0.95], [0.85, 0.95], [0.85, 0.95]],
+                [[0.95, 1.05], [0.95, 1.05], [0.95, 1.05]],
+                [[1.05, 1.15], [1.05, 1.15], [1.05, 1.20]],
+            ]
+            box_mixture_mass_ranges = [
+                [1.2, 1.8],
+                [2.0, 2.8],
+                [2.8, 3.5],
+            ]
 
             random_size = use_random
             scale_range_x = [0.7, 1.3]
@@ -239,8 +252,8 @@ class G1Cfg(LeggedRobotCfg):
         resampling_time = 0.0
         resample_carry_commands = True
         carry_resample_interval_s = [1.5, 3.0]
-        carry_stop_probability = 0.2
-        carry_moving_vx_range = [0.2, 0.8]
+        carry_stop_probability = 0.0
+        carry_moving_vx_range = [0.1, 0.8]
         carry_turn_probability = 0.4
         carry_turn_yaw_range = [0.1, 0.4]
         heading_kp = 1.0
@@ -272,6 +285,7 @@ class G1Cfg(LeggedRobotCfg):
             carryup_task = 1.0
             carry_velocity_task = 1.0
             carry_heading_hold = 0.3
+            carry_contact_task = 0.5
 
         # walk
         robot2object_pos = 0.0
@@ -289,6 +303,12 @@ class G1Cfg(LeggedRobotCfg):
         carry_heading_sigma = 0.25
         carry_heading_huber_delta = 0.35
         carry_heading_huber_weight = 1.0
+
+        # carry contact preservation
+        carry_bilateral_contact = 1.0
+        carry_robot2object_vel = 1.0
+        carry_robot2object_pos = 0.5
+        hand_contact_threshold = 1.0
 
         target_speed_loco = 0.85
         thresh_robot2object = 0.7

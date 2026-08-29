@@ -329,6 +329,8 @@ class LeggedRobot(BaseTask):
         self.last_dof_vel[env_ids] = 0.
         self.last_torques[env_ids] = 0.
         self.feet_air_time[env_ids] = 0.
+        self.last_hand_contacts[env_ids] = False
+        self.hand_contact_filt[env_ids] = False
         self.joint_powers[env_ids] = 0.
         self.delay_buffer[:, env_ids, :] = self.dof_pos[env_ids] - self.default_dof_pos
         self.carry_heading_ref[env_ids] = 0.0
@@ -1118,6 +1120,8 @@ class LeggedRobot(BaseTask):
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
         self.first_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
+        self.last_hand_contacts = torch.zeros(self.num_envs, len(self.hand_colli_indices), dtype=torch.bool, device=self.device, requires_grad=False)
+        self.hand_contact_filt = torch.zeros_like(self.last_hand_contacts)
         self.can_see_tag = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
         self.has_seen_tag = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
         self.base_lin_vel = quat_rotate_inverse(self.rigid_body_states[:, self.upper_body_index,3:7], self.rigid_body_states[:, self.upper_body_index,7:10])
@@ -1338,38 +1342,71 @@ class LeggedRobot(BaseTask):
     def _load_box_asset(self):
         self._box_scale = torch.ones((self.num_envs, 3), device=self.device, dtype=torch.float)
         self._box_density = torch.zeros((self.num_envs), device=self.device, dtype=torch.float)
+        self._box_mixture_id = torch.full((self.num_envs,), -1, device=self.device, dtype=torch.long)
+        self._box_target_mass = torch.zeros((self.num_envs), device=self.device, dtype=torch.float)
 
-        if self.box_cfg.random_size:
-            assert int((self.box_cfg.scale_range_x[1] - self.box_cfg.scale_range_x[0]) % self.box_cfg.scale_sample_interval) == 0
-            assert int((self.box_cfg.scale_range_y[1] - self.box_cfg.scale_range_y[0]) % self.box_cfg.scale_sample_interval) == 0
-            assert int((self.box_cfg.scale_range_z[1] - self.box_cfg.scale_range_z[0]) % self.box_cfg.scale_sample_interval) == 0
-            
-            x_scale_linespace = torch.arange(self.box_cfg.scale_range_x[0], self.box_cfg.scale_range_x[1] + self.box_cfg.scale_sample_interval, self.box_cfg.scale_sample_interval, device=self.device)
-            y_scale_linespace = torch.arange(self.box_cfg.scale_range_y[0], self.box_cfg.scale_range_y[1] + self.box_cfg.scale_sample_interval, self.box_cfg.scale_sample_interval, device=self.device)
-            z_scale_linespace = torch.arange(self.box_cfg.scale_range_z[0], self.box_cfg.scale_range_z[1] + self.box_cfg.scale_sample_interval, self.box_cfg.scale_sample_interval, device=self.device)
-            num_scales = x_scale_linespace.shape[0] * y_scale_linespace.shape[0] * z_scale_linespace.shape[0]
-            scale_pool = torch.cartesian_prod(x_scale_linespace, y_scale_linespace, z_scale_linespace)
+        if getattr(self.box_cfg, "use_mass_size_mixture", False):
+            mixture_probabilities = torch.tensor(
+                self.box_cfg.box_mixture_probabilities, device=self.device, dtype=torch.float)
+            assert torch.all(mixture_probabilities >= 0.0)
+            assert torch.isclose(mixture_probabilities.sum(), torch.tensor(1.0, device=self.device))
 
-            if self.num_envs >= num_scales:
-                sampled_scale_id = torch.multinomial(torch.ones(num_scales) * (1.0 / num_scales), num_samples=(self.num_envs - num_scales), replacement=True)
-                self._box_scale[:num_scales] = scale_pool[:num_scales]
-                self._box_scale[num_scales:] = scale_pool[sampled_scale_id]
+            scale_ranges = torch.tensor(
+                self.box_cfg.box_mixture_scale_ranges, device=self.device, dtype=torch.float)
+            mass_ranges = torch.tensor(
+                self.box_cfg.box_mixture_mass_ranges, device=self.device, dtype=torch.float)
+            self._box_mixture_id = torch.multinomial(
+                mixture_probabilities, num_samples=self.num_envs, replacement=True)
 
-                shuffled_id = torch.randperm(self.num_envs)
-                self._box_scale = self._box_scale[shuffled_id]
-            else:
-                sampled_scale_id = torch.multinomial(torch.ones(num_scales) * (1.0 / num_scales), num_samples=self.num_envs, replacement=True)
-                self._box_scale = scale_pool[sampled_scale_id]
+            sampled_scale_ranges = scale_ranges[self._box_mixture_id]
+            self._box_scale = sampled_scale_ranges[..., 0] + torch.rand(
+                (self.num_envs, 3), device=self.device) * (
+                    sampled_scale_ranges[..., 1] - sampled_scale_ranges[..., 0])
+            self._box_size = torch.tensor(
+                self.box_cfg.base_size, device=self.device, dtype=torch.float).reshape(1, 3) * self._box_scale
 
-        self._box_size = torch.tensor(self.box_cfg.base_size, device=self.device).reshape(1, 3) * self._box_scale
-        
-        if self.box_cfg.random_density:
-            density_range_low = torch.tensor(self.box_cfg.density_range[0], device=self.device, dtype=torch.float)
-            density_range_high = torch.tensor(self.box_cfg.density_range[1], device=self.device, dtype=torch.float)
-            dist = torch.distributions.uniform.Uniform(density_range_low, density_range_high)
-            self._box_density = dist.sample((self.num_envs,))
+            sampled_mass_ranges = mass_ranges[self._box_mixture_id]
+            self._box_target_mass = sampled_mass_ranges[:, 0] + torch.rand(
+                self.num_envs, device=self.device) * (
+                    sampled_mass_ranges[:, 1] - sampled_mass_ranges[:, 0])
+            box_volume = torch.prod(self._box_size, dim=-1)
+            self._box_density = self._box_target_mass / box_volume
+
+            assert torch.all(torch.isfinite(self._box_size)) and torch.all(self._box_size > 0.0)
+            assert torch.all(torch.isfinite(self._box_target_mass)) and torch.all(self._box_target_mass > 0.0)
+            assert torch.all(torch.isfinite(self._box_density)) and torch.all(self._box_density > 0.0)
         else:
-            self._box_density[:] = self.box_cfg.density_default
+            if self.box_cfg.random_size:
+                assert int((self.box_cfg.scale_range_x[1] - self.box_cfg.scale_range_x[0]) % self.box_cfg.scale_sample_interval) == 0
+                assert int((self.box_cfg.scale_range_y[1] - self.box_cfg.scale_range_y[0]) % self.box_cfg.scale_sample_interval) == 0
+                assert int((self.box_cfg.scale_range_z[1] - self.box_cfg.scale_range_z[0]) % self.box_cfg.scale_sample_interval) == 0
+
+                x_scale_linespace = torch.arange(self.box_cfg.scale_range_x[0], self.box_cfg.scale_range_x[1] + self.box_cfg.scale_sample_interval, self.box_cfg.scale_sample_interval, device=self.device)
+                y_scale_linespace = torch.arange(self.box_cfg.scale_range_y[0], self.box_cfg.scale_range_y[1] + self.box_cfg.scale_sample_interval, self.box_cfg.scale_sample_interval, device=self.device)
+                z_scale_linespace = torch.arange(self.box_cfg.scale_range_z[0], self.box_cfg.scale_range_z[1] + self.box_cfg.scale_sample_interval, self.box_cfg.scale_sample_interval, device=self.device)
+                num_scales = x_scale_linespace.shape[0] * y_scale_linespace.shape[0] * z_scale_linespace.shape[0]
+                scale_pool = torch.cartesian_prod(x_scale_linespace, y_scale_linespace, z_scale_linespace)
+
+                if self.num_envs >= num_scales:
+                    sampled_scale_id = torch.multinomial(torch.ones(num_scales) * (1.0 / num_scales), num_samples=(self.num_envs - num_scales), replacement=True)
+                    self._box_scale[:num_scales] = scale_pool[:num_scales]
+                    self._box_scale[num_scales:] = scale_pool[sampled_scale_id]
+
+                    shuffled_id = torch.randperm(self.num_envs)
+                    self._box_scale = self._box_scale[shuffled_id]
+                else:
+                    sampled_scale_id = torch.multinomial(torch.ones(num_scales) * (1.0 / num_scales), num_samples=self.num_envs, replacement=True)
+                    self._box_scale = scale_pool[sampled_scale_id]
+
+            self._box_size = torch.tensor(self.box_cfg.base_size, device=self.device).reshape(1, 3) * self._box_scale
+
+            if self.box_cfg.random_density:
+                density_range_low = torch.tensor(self.box_cfg.density_range[0], device=self.device, dtype=torch.float)
+                density_range_high = torch.tensor(self.box_cfg.density_range[1], device=self.device, dtype=torch.float)
+                dist = torch.distributions.uniform.Uniform(density_range_low, density_range_high)
+                self._box_density = dist.sample((self.num_envs,))
+            else:
+                self._box_density[:] = self.box_cfg.density_default
 
         self.box_assets = []
 
@@ -1993,6 +2030,7 @@ class LeggedRobot(BaseTask):
         return carryup_reward
 
     def _reward_carry_velocity_task(self):
+        #内需要添加hand2object的reward，才能有效避免box掉落
         desired_heading_dir = torch.stack((torch.cos(self.carry_heading_ref),
                                            torch.sin(self.carry_heading_ref)), dim=-1)
         desired_world_lin_vel_xy = self.carry_policy_commands[:, 0:1] * desired_heading_dir
@@ -2007,6 +2045,33 @@ class LeggedRobot(BaseTask):
                         self.cfg.rewards.carry_yaw_vel * yaw_vel_reward)
         carry_reward[~self.is_stage_carry] = 0.
         return carry_reward
+
+    def _reward_carry_contact_task(self):
+        current_hand_contact = torch.norm(
+            self.contact_forces[:, self.hand_colli_indices], dim=-1
+        ) > self.cfg.rewards.hand_contact_threshold
+        self.hand_contact_filt = torch.logical_or(
+            current_hand_contact, self.last_hand_contacts)
+        self.last_hand_contacts = current_hand_contact
+        bilateral_contact_reward = torch.prod(
+            self.hand_contact_filt.to(dtype=torch.float), dim=-1)
+
+        robot_vel_xy = self.rigid_body_states[:, self.upper_body_index, 7:9]
+        box_vel_xy = self.box_states[:, 7:9]
+        rel_vel_error = torch.sum(torch.square(box_vel_xy - robot_vel_xy), dim=-1)
+        relative_velocity_reward = torch.exp(-5.0 * rel_vel_error)
+
+        relative_position_reward = torch.exp(-0.5 * self.robot2object_dist)
+        relative_position_reward[
+            self.robot2object_dist < self.cfg.rewards.thresh_robot2object
+        ] = 1.0
+
+        carry_contact_reward = (
+            self.cfg.rewards.carry_bilateral_contact * bilateral_contact_reward
+            + self.cfg.rewards.carry_robot2object_vel * relative_velocity_reward
+            + self.cfg.rewards.carry_robot2object_pos * relative_position_reward)
+        carry_contact_reward[~self.is_stage_carry] = 0.0
+        return carry_contact_reward
 
     def _reward_carry_heading_hold(self):
         heading_alignment = torch.exp(
