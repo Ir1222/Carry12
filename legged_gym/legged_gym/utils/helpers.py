@@ -165,6 +165,17 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             env_cfg.play_dataset = False
         if env_cfg.play_dataset:
             env_cfg.env.num_envs = 1
+        if hasattr(env_cfg, "external_force"):
+            if args.enable_external_force:
+                env_cfg.external_force.enable_external_force = True
+            if args.force_direction is not None:
+                env_cfg.external_force.force_directions = (args.force_direction,)
+            if args.force_beta is not None:
+                env_cfg.external_force.beta_range = (args.force_beta, args.force_beta)
+            if args.force_debug:
+                env_cfg.external_force.debug_logging = True
+            if args.force_debug_viz:
+                env_cfg.external_force.debug_draw_force = True
     if cfg_train is not None:
         if args.seed is not None:
             cfg_train.seed = args.seed
@@ -204,6 +215,11 @@ def get_args():
         {"name": "--seed", "type": int, "help": "Random seed. Overrides config file if provided."},
         {"name": "--max_iterations", "type": int, "help": "Maximum number of training iterations. Overrides config file if provided."},
         {"name": "--play_dataset", "action": "store_true", "default": False, "help": "Visualize the reference."},
+        {"name": "--enable_external_force", "action": "store_true", "default": False, "help": "Enable configured Stage2A box-force events when the selected task supports them."},
+        {"name": "--force_direction", "type": str, "help": "Override the Stage2A box-frame force direction (for example, -box_x)."},
+        {"name": "--force_beta", "type": float, "help": "Override Stage2A beta with a fixed mass-normalized force scale."},
+        {"name": "--force_debug", "action": "store_true", "default": False, "help": "Enable selected-environment Stage2A force/teacher logging."},
+        {"name": "--force_debug_viz", "action": "store_true", "default": False, "help": "Draw the Stage2A box-COM force in the viewer."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(
@@ -427,4 +443,3 @@ class Return_Onnx(torch.nn.Module):
             dynamic_axes={},
         )
         
-    

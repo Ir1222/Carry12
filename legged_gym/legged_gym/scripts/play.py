@@ -30,11 +30,18 @@ def play(args):
     train_cfg.runner.resume = True
 
     # carrybox
-    if args.task in ('carrybox', 'carrybox_perturb'):
+    if args.task in ('carrybox', 'carrybox_force', 'carrybox_perturb'):
         env_cfg.asset.box.random_props = False
         env_cfg.asset.box.reset_mode = 'default'
-        env_cfg.env.episode_length_s = 10
-        if args.task == 'carrybox':
+        force_enabled = (
+            args.task == 'carrybox_force'
+            and env_cfg.external_force.enable_external_force
+        )
+        if not force_enabled:
+            env_cfg.env.episode_length_s = 10
+        if args.task == 'carrybox' or (
+            args.task == 'carrybox_force' and not force_enabled
+        ):
             env_cfg.commands.resample_carry_commands = False
     
     if args.play_dataset:
@@ -49,7 +56,7 @@ def play(args):
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
 
-    if args.task == 'carrybox':
+    if args.task in ('carrybox', 'carrybox_force'):
         env.commands[:, 0] = 0.8
         env.commands[:, 1] = 0.0
         env.commands[:, 2] = 0.0
