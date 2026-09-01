@@ -399,29 +399,44 @@ class TestCheckpointLoadingSemantics(unittest.TestCase):
             for node in runner_class.body
             if isinstance(node, ast.FunctionDef) and node.name == "load"
         )
-        namespace = {"torch": torch}
+        namespace = {"math": math, "torch": torch}
         method_module = ast.Module(body=[load_node], type_ignores=[])
         ast.fix_missing_locations(method_module)
         exec(compile(method_module, str(runner_path), "exec"), namespace)
         cls.load_method = staticmethod(namespace["load"])
 
-    def _runner(self):
+    @staticmethod
+    def _optimizer(group_lrs):
+        parameters = [torch.nn.Parameter(torch.tensor(float(index))) for index in range(len(group_lrs))]
+        optimizer = torch.optim.Adam(
+            [
+                {"params": [parameter], "lr": learning_rate}
+                for parameter, learning_rate in zip(parameters, group_lrs)
+            ]
+        )
+        for parameter in parameters:
+            parameter.grad = torch.ones_like(parameter)
+        optimizer.step()
+        return optimizer
+
+    def _runner(self, group_count=1):
         return types.SimpleNamespace(
             device="cpu",
             cfg={"use_muon_optim": False},
             alg=types.SimpleNamespace(
                 actor_critic=_StateRecorder(),
                 amp=_StateRecorder(),
-                optimizer=_StateRecorder(),
+                optimizer=self._optimizer((3.0e-4,) * group_count),
+                learning_rate=3.0e-4,
             ),
             current_learning_iteration=0,
         )
 
-    def _checkpoint(self):
+    def _checkpoint(self, optimizer_lrs):
         checkpoint = {
             "model_state_dict": {"actor_critic": "weights"},
             "amp_state_dict": {"amp": "weights"},
-            "optimizer_state_dict": {"adam": "state"},
+            "optimizer_state_dict": self._optimizer(optimizer_lrs).state_dict(),
             "iter": 1234,
             "infos": {"source": "unit-test"},
         }
@@ -432,7 +447,8 @@ class TestCheckpointLoadingSemantics(unittest.TestCase):
 
     def test_finetune_loads_weights_only_and_starts_at_zero(self):
         runner = self._runner()
-        temp_dir, path = self._checkpoint()
+        initial_optimizer_state = runner.alg.optimizer.state_dict()
+        temp_dir, path = self._checkpoint((1.2e-4,))
         try:
             infos = self.load_method(
                 runner,
@@ -444,21 +460,46 @@ class TestCheckpointLoadingSemantics(unittest.TestCase):
             temp_dir.cleanup()
         self.assertEqual(runner.alg.actor_critic.loaded, [{"actor_critic": "weights"}])
         self.assertEqual(runner.alg.amp.loaded, [{"amp": "weights"}])
-        self.assertEqual(runner.alg.optimizer.loaded, [])
+        self.assertEqual(runner.alg.optimizer.state_dict(), initial_optimizer_state)
+        self.assertEqual(runner.alg.optimizer.param_groups[0]["lr"], 3.0e-4)
+        self.assertEqual(runner.alg.learning_rate, 3.0e-4)
         self.assertEqual(runner.current_learning_iteration, 0)
         self.assertEqual(infos, {"source": "unit-test"})
 
-    def test_resume_loads_weights_optimizer_and_iteration(self):
+    def test_resume_synchronizes_adaptive_lr_and_restores_iteration(self):
         runner = self._runner()
-        temp_dir, path = self._checkpoint()
+        temp_dir, path = self._checkpoint((1.333e-4,))
         try:
             self.load_method(runner, path)
         finally:
             temp_dir.cleanup()
         self.assertEqual(runner.alg.actor_critic.loaded, [{"actor_critic": "weights"}])
         self.assertEqual(runner.alg.amp.loaded, [{"amp": "weights"}])
-        self.assertEqual(runner.alg.optimizer.loaded, [{"adam": "state"}])
+        self.assertEqual(runner.alg.optimizer.param_groups[0]["lr"], 1.333e-4)
+        self.assertEqual(runner.alg.learning_rate, 1.333e-4)
         self.assertEqual(runner.current_learning_iteration, 1234)
+
+    def test_resume_accepts_identical_lr_across_optimizer_groups(self):
+        runner = self._runner(group_count=3)
+        temp_dir, path = self._checkpoint((1.5e-4, 1.5e-4, 1.5e-4))
+        try:
+            self.load_method(runner, path)
+        finally:
+            temp_dir.cleanup()
+        self.assertEqual(
+            [group["lr"] for group in runner.alg.optimizer.param_groups],
+            [1.5e-4, 1.5e-4, 1.5e-4],
+        )
+        self.assertEqual(runner.alg.learning_rate, 1.5e-4)
+
+    def test_resume_rejects_inconsistent_optimizer_group_lrs(self):
+        runner = self._runner(group_count=2)
+        temp_dir, path = self._checkpoint((1.0e-4, 3.0e-4))
+        try:
+            with self.assertRaisesRegex(ValueError, "single shared optimizer LR"):
+                self.load_method(runner, path)
+        finally:
+            temp_dir.cleanup()
 
     def test_task_registry_dispatches_explicit_loading_modes(self):
         registry_path = (

@@ -30,6 +30,7 @@
 
 import time
 import os
+import math
 from collections import deque
 import statistics
 
@@ -311,6 +312,22 @@ class HIMOnPolicyRunner:
             load_optimizer = False
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
+            restored_lrs = [float(group['lr']) for group in self.alg.optimizer.param_groups]
+            if not restored_lrs:
+                raise ValueError(
+                    "Cannot synchronize adaptive self.learning_rate: "
+                    "restored optimizer has no parameter groups"
+                )
+            restored_lr = restored_lrs[0]
+            if any(
+                not math.isclose(lr, restored_lr, rel_tol=1.0e-6, abs_tol=1.0e-12)
+                for lr in restored_lrs[1:]
+            ):
+                raise ValueError(
+                    "Adaptive self.learning_rate requires a single shared optimizer LR; "
+                    f"restored param-group LRs are {restored_lrs}"
+                )
+            self.alg.learning_rate = restored_lr
         if load_iteration:
             self.current_learning_iteration = loaded_dict['iter']
         else:
