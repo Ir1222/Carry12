@@ -11,6 +11,7 @@ from legged_gym.utils import (
     load_onnx_policy,
     task_registry,
 )
+from legged_gym.utils.helpers import update_cfg_from_args
 
 import torch
 
@@ -98,6 +99,10 @@ def load_actor_only_for_inference(ppo_runner, checkpoint_path, device):
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
+    # Apply the existing CLI config overrides before selecting playback-only
+    # episode and command settings. task_registry.make_env applies these again
+    # immediately before construction; the operation is idempotent.
+    env_cfg, _ = update_cfg_from_args(env_cfg, None, args)
 
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 10)
@@ -111,10 +116,19 @@ def play(args):
     args.resume = False
 
     # carrybox
-    if args.task in ("carrybox", "carrybox_perturb"):
+    if args.task in ("carrybox", "carrybox_force", "carrybox_perturb"):
         env_cfg.asset.box.random_props = False
         env_cfg.asset.box.reset_mode = "default"
-        env_cfg.env.episode_length_s = 10
+        force_enabled = (
+            args.task == "carrybox_force"
+            and env_cfg.external_force.enable_external_force
+        )
+        if not force_enabled:
+            env_cfg.env.episode_length_s = 10
+        if args.task == "carrybox" or (
+            args.task == "carrybox_force" and not force_enabled
+        ):
+            env_cfg.commands.resample_carry_commands = False
 
     if args.play_dataset:
         env_cfg.viewer.pos = [-5, -5, 4]
