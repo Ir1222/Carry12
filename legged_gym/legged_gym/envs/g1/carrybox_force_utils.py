@@ -64,7 +64,8 @@ def compute_admittance_teacher(
     damping = torch.clamp(box_mass * float(admittance_d_bar), min=1.0e-9)
     u_parallel = nominal_vx + force_parallel / damping
     u_perp = force_perp / damping
-    raw_heading_offset = torch.atan2(u_perp, u_parallel)
+    u_parallel_for_heading = torch.clamp(u_parallel, min=0.0)
+    raw_heading_offset = torch.atan2(u_perp, u_parallel_for_heading)
     heading_offset = torch.clamp(
         raw_heading_offset,
         min=-float(max_heading_offset),

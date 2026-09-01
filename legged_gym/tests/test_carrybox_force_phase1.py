@@ -68,6 +68,17 @@ class TestAdmittanceTeacher(unittest.TestCase):
         self.assertAlmostEqual(float(teacher[1]), 0.0, places=12)
         self.assertAlmostEqual(float(teacher[3]), 0.0, places=12)
 
+    def test_strong_pure_backward_force_stops_without_turning(self):
+        teacher = self._teacher((-18.0, 0.0))
+        self.assertAlmostEqual(float(teacher[0]), 0.0, places=12)
+        self.assertAlmostEqual(float(teacher[1]), 0.0, places=12)
+        self.assertAlmostEqual(float(teacher[3]), 0.0, places=12)
+
+    def test_backward_force_before_zero_crossing_remains_longitudinal(self):
+        teacher = self._teacher((-7.5, 0.0))
+        self.assertAlmostEqual(float(teacher[0]), 0.25, places=12)
+        self.assertAlmostEqual(float(teacher[1]), 0.0, places=12)
+
     def test_direction_signs(self):
         mass = 2.5
         peak = 0.10 * mass * 9.81
