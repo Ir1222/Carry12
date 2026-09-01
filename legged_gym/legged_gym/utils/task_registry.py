@@ -144,15 +144,22 @@ class TaskRegistry():
             log_dir = os.path.join(log_root, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + train_cfg.runner.run_name)
         
         
+        resume = train_cfg.runner.resume
+        finetune_path = getattr(train_cfg.runner, "finetune_path", None)
+        if resume and finetune_path is not None:
+            raise ValueError("Fine-tune initialization and full resume are mutually exclusive")
+
         train_cfg_dict = class_to_dict(train_cfg)
         runner = HIMOnPolicyRunner(env, train_cfg_dict, log_dir, device=args.rl_device)
-        #save resume path before creating a new log_dir
-        resume = train_cfg.runner.resume
         if resume:
             # load previously trained model
             resume_path = train_cfg.runner.resume_path.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
             print(f"Loading model from: {resume_path}")
             runner.load(resume_path)
+        elif finetune_path is not None:
+            finetune_path = finetune_path.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
+            print(f"Initializing model and AMP weights from: {finetune_path}")
+            runner.load(finetune_path, load_optimizer=False, load_iteration=False)
         return runner, train_cfg
 
 

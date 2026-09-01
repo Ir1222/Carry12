@@ -1,4 +1,4 @@
-"""Stage2A Phase 1 external-force infrastructure for the current CarryBox task."""
+"""Formal Stage2A external-force fine-tuning for the current CarryBox task."""
 
 import math
 
@@ -11,7 +11,12 @@ from isaacgym.torch_utils import quat_rotate
 from legged_gym.utils.math import wrap_to_pi
 
 from .carrybox import LeggedRobot as CarryBox
-from .carrybox_force_utils import compute_admittance_teacher, smooth_force_profile
+from .carrybox_force_utils import (
+    compute_admittance_teacher,
+    resolve_directional_beta_ranges,
+    sample_directional_beta,
+    smooth_force_profile,
+)
 
 
 class LeggedRobot(CarryBox):
@@ -97,13 +102,20 @@ class LeggedRobot(CarryBox):
         cfg = self.cfg.external_force
         unknown = set(cfg.force_directions) - set(self._DIRECTION_LOCAL)
         if unknown:
-            raise ValueError(f"Unsupported Phase 1 force directions: {sorted(unknown)}")
+            raise ValueError(f"Unsupported Stage2A force directions: {sorted(unknown)}")
         if len(cfg.force_directions) == 0:
             raise ValueError("force_directions must not be empty")
         if not 0.0 <= float(cfg.force_event_probability) <= 1.0:
             raise ValueError("force_event_probability must be in [0, 1]")
-        if not (0.0 <= float(cfg.beta_range[0]) <= float(cfg.beta_range[1])):
-            raise ValueError("beta_range must be non-negative and ordered")
+        resolve_directional_beta_ranges(
+            cfg.curriculum_beta_ranges,
+            cfg.curriculum_stage,
+            cfg.force_directions,
+        )
+        if cfg.beta_range is not None and not (
+            0.0 <= float(cfg.beta_range[0]) <= float(cfg.beta_range[1])
+        ):
+            raise ValueError("beta_range override must be non-negative and ordered")
         if not (0.0 <= float(cfg.force_hold_duration_range_s[0]) <= float(cfg.force_hold_duration_range_s[1])):
             raise ValueError("force_hold_duration_range_s must be non-negative and ordered")
         if float(cfg.force_ramp_up_duration_s) < 0.0 or float(cfg.force_ramp_down_duration_s) < 0.0:
@@ -319,7 +331,13 @@ class LeggedRobot(CarryBox):
             raise RuntimeError("Box-frame force direction has a degenerate horizontal projection")
         direction_world = direction_world / direction_norm
 
-        beta = self._uniform_sample(cfg.beta_range, len(env_ids))
+        beta = sample_directional_beta(
+            direction_names,
+            direction_ids,
+            cfg.curriculum_beta_ranges,
+            cfg.curriculum_stage,
+            beta_range=cfg.beta_range,
+        )
         hold_duration_s = self._uniform_sample(
             cfg.force_hold_duration_range_s, len(env_ids)
         )

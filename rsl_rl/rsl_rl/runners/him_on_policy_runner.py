@@ -302,7 +302,7 @@ class HIMOnPolicyRunner:
             'infos': infos,
             }, path)
 
-    def load(self, path, load_optimizer=True):
+    def load(self, path, load_optimizer=True, load_iteration=True):
         loaded_dict = torch.load(path, map_location=self.device)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if 'amp_state_dict' in loaded_dict.keys():
@@ -311,7 +311,10 @@ class HIMOnPolicyRunner:
             load_optimizer = False
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
-        self.current_learning_iteration = loaded_dict['iter']
+        if load_iteration:
+            self.current_learning_iteration = loaded_dict['iter']
+        else:
+            self.current_learning_iteration = 0
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None):

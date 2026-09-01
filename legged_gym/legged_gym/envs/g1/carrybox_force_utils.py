@@ -9,6 +9,73 @@ import math
 import torch
 
 
+def resolve_directional_beta_ranges(
+    curriculum_beta_ranges,
+    curriculum_stage,
+    direction_names,
+):
+    """Return validated beta ranges in the same order as ``direction_names``."""
+    allowed_stages = tuple(sorted(curriculum_beta_ranges))
+    if curriculum_stage not in curriculum_beta_ranges:
+        raise ValueError(
+            f"force curriculum stage must be one of {allowed_stages}, "
+            f"got {curriculum_stage!r}"
+        )
+
+    stage_ranges = curriculum_beta_ranges[curriculum_stage]
+    missing = [name for name in direction_names if name not in stage_ranges]
+    if missing:
+        raise ValueError(
+            f"force curriculum stage {curriculum_stage} has no beta range for {missing}"
+        )
+
+    resolved = []
+    for name in direction_names:
+        value_range = stage_ranges[name]
+        if len(value_range) != 2:
+            raise ValueError(f"beta range for {name} must contain exactly two values")
+        low, high = float(value_range[0]), float(value_range[1])
+        if not 0.0 <= low <= high:
+            raise ValueError(
+                f"beta range for {name} must be non-negative and ordered, got {value_range}"
+            )
+        resolved.append((low, high))
+    return tuple(resolved)
+
+
+def sample_directional_beta(
+    direction_names,
+    direction_ids,
+    curriculum_beta_ranges,
+    curriculum_stage,
+    beta_range=None,
+):
+    """Sample beta per environment from its selected direction's range.
+
+    A non-None ``beta_range`` is a global override, including the fixed
+    ``(X, X)`` range installed by ``--force_beta X``.
+    """
+    count = int(direction_ids.numel())
+    if beta_range is not None:
+        low, high = float(beta_range[0]), float(beta_range[1])
+        if not 0.0 <= low <= high:
+            raise ValueError("beta_range override must be non-negative and ordered")
+        return low + (high - low) * torch.rand(count, device=direction_ids.device)
+
+    ranges = resolve_directional_beta_ranges(
+        curriculum_beta_ranges,
+        curriculum_stage,
+        direction_names,
+    )
+    range_tensor = torch.tensor(ranges, dtype=torch.float, device=direction_ids.device)
+    if torch.any((direction_ids < 0) | (direction_ids >= len(direction_names))):
+        raise ValueError("direction_ids contains an index outside direction_names")
+    selected_ranges = range_tensor[direction_ids]
+    return selected_ranges[:, 0] + (
+        selected_ranges[:, 1] - selected_ranges[:, 0]
+    ) * torch.rand(count, device=direction_ids.device)
+
+
 def smooth_force_profile(elapsed_s, ramp_up_s, hold_s, ramp_down_s):
     """Cosine ramp-up, constant hold, and cosine ramp-down force scale."""
     ramp_up_s = torch.clamp(ramp_up_s, min=0.0)

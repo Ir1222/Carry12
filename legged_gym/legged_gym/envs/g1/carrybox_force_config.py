@@ -5,17 +5,40 @@ from .carrybox_config import G1CfgPPO as CarryBoxCfgPPO
 
 
 class G1Cfg(CarryBoxCfg):
-    """Stage2A Phase 1 config; the Stage1 policy interface is inherited verbatim."""
+    """Formal Stage2A config; the Stage1 policy interface is inherited verbatim."""
 
     class domain_rand(CarryBoxCfg.domain_rand):
         # Isolate the box-force -> teacher -> response causal chain.
         disturbance = False
 
     class external_force:
-        enable_external_force = False
+        enable_external_force = True
         force_event_probability = 1.0
-        force_directions = ("-box_x",)
-        beta_range = (0.10, 0.10)
+        force_directions = ("+box_x", "-box_x", "+box_y", "-box_y")
+        curriculum_stage = 1
+        curriculum_beta_ranges = {
+            1: {
+                "-box_x": (0.2, 0.4),
+                "+box_x": (0.2, 0.4),
+                "+box_y": (0.2, 0.4),
+                "-box_y": (0.2, 0.4),
+            },
+            2: {
+                "-box_x": (0.2, 0.4),
+                "+box_x": (0.2, 0.6),
+                "+box_y": (0.2, 0.6),
+                "-box_y": (0.2, 0.6),
+            },
+            3: {
+                "-box_x": (0.2, 0.4),
+                "+box_x": (0.2, 0.8),
+                "+box_y": (0.2, 0.8),
+                "-box_y": (0.2, 0.8),
+            },
+        }
+        # None selects the direction-dependent curriculum. A fixed CLI beta
+        # replaces this with (beta, beta) as a global debugging override.
+        beta_range = None
 
         force_ramp_up_duration_s = 0.4
         force_hold_duration_range_s = (2.0, 4.0)
@@ -36,8 +59,14 @@ class G1Cfg(CarryBoxCfg):
 
 
 class G1CfgPPO(CarryBoxCfgPPO):
+    class algorithm(CarryBoxCfgPPO.algorithm):
+        learning_rate = 3.0e-4
+        schedule = "adaptive"
+        desired_kl = 0.01
+
     class runner(CarryBoxCfgPPO.runner):
-        run_name = "stage2a_force_phase1"
-        experiment_name = "Ampstage2a_force_phase1"
+        run_name = "stage2a_force_train"
+        experiment_name = "Ampstage2a_force"
+        finetune_path = None
 
     amp = G1Cfg.amp

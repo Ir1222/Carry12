@@ -172,6 +172,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
                 env_cfg.external_force.force_directions = (args.force_direction,)
             if args.force_beta is not None:
                 env_cfg.external_force.beta_range = (args.force_beta, args.force_beta)
+            if getattr(args, "force_curriculum_stage", None) is not None:
+                env_cfg.external_force.curriculum_stage = args.force_curriculum_stage
             if args.force_debug:
                 env_cfg.external_force.debug_logging = True
             if args.force_debug_viz:
@@ -186,6 +188,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             cfg_train.runner.resume = args.resume
         if args.resume_path is not None:
             cfg_train.runner.resume_path = args.resume_path
+        if getattr(args, "finetune_path", None) is not None:
+            cfg_train.runner.finetune_path = args.finetune_path
         if args.experiment_name is not None:
             cfg_train.runner.experiment_name = args.experiment_name
         if args.run_name is not None:
@@ -202,6 +206,7 @@ def get_args():
         {"name": "--task", "type": str, "default": "g1", "help": "Resume training or start testing from a checkpoint. Overrides config file if provided."},
         {"name": "--resume", "action": "store_true", "default": False,  "help": "Resume training from a checkpoint"},
         {"name": "--resume_path", "type": str,  "help": "Path to the directory where the run to be resumed is located."},
+        {"name": "--finetune_path", "type": str, "help": "Initialize model and AMP weights from a checkpoint without restoring optimizer state or iteration."},
         {"name": "--experiment_name", "type": str,  "help": "Name of the experiment to run or load. Overrides config file if provided."},
         {"name": "--run_name", "type": str,  "help": "Name of the run. Overrides config file if provided."},
         {"name": "--load_run", "type": str,  "help": "Name of the run to load when resume=True. If -1: will load the last run. Overrides config file if provided."},
@@ -218,6 +223,7 @@ def get_args():
         {"name": "--enable_external_force", "action": "store_true", "default": False, "help": "Enable configured Stage2A box-force events when the selected task supports them."},
         {"name": "--force_direction", "type": str, "help": "Override the Stage2A box-frame force direction (for example, -box_x)."},
         {"name": "--force_beta", "type": float, "help": "Override Stage2A beta with a fixed mass-normalized force scale."},
+        {"name": "--force_curriculum_stage", "type": int, "choices": (1, 2, 3), "help": "Select the manual Stage2A force curriculum stage."},
         {"name": "--force_debug", "action": "store_true", "default": False, "help": "Enable selected-environment Stage2A force/teacher logging."},
         {"name": "--force_debug_viz", "action": "store_true", "default": False, "help": "Draw the Stage2A box-COM force in the viewer."},
     ]
@@ -225,6 +231,8 @@ def get_args():
     args = gymutil.parse_arguments(
         description="RL Policy",
         custom_parameters=custom_parameters)
+    if args.resume and args.finetune_path is not None:
+        raise ValueError("--finetune_path cannot be combined with --resume")
 
     # name allignment
     # args.sim_device_id = args.compute_device_id
