@@ -32,7 +32,10 @@ TASK_NAME = "carrybox_force"
 
 def _parse_args():
     """Remove play-only flags before delegating to the shared Isaac Gym parser."""
-    parser = argparse.ArgumentParser(add_help=False)
+    # Shared force options must remain unknown here.  Disabling abbreviation
+    # prevents --force_direction from being consumed as the prefix of the
+    # play-only --force_direction_draw_length option.
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("--vx", type=float, default=0.4)
     parser.add_argument("--vy", type=float, default=0.0)
     parser.add_argument("--yaw_rate", type=float, default=0.0)
