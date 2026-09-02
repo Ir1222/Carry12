@@ -1033,7 +1033,10 @@ def play(args):
     )
     if not isinstance(env, G1CarryBoxForce):
         raise RuntimeError("task_registry did not construct the formal carrybox_force environment.")
-    if not math.isclose(float(env.dt), policy_dt, rel_tol=0.0, abs_tol=1.0e-12):
+    # env.dt may be materialized from Isaac Gym's float32 SimParams while the
+    # config-side product above is a Python float. Accept representation noise,
+    # but still reject a meaningful control-frequency mismatch.
+    if not math.isclose(float(env.dt), policy_dt, rel_tol=1.0e-6, abs_tol=1.0e-9):
         raise RuntimeError(
             "Environment policy timestep differs from sim.dt * control.decimation: "
             f"env.dt={float(env.dt)}, derived={policy_dt}."
