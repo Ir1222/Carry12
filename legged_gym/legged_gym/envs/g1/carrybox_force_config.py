@@ -43,6 +43,7 @@ class G1Cfg(CarryBoxCfg):
         force_ramp_up_duration_s = 0.4
         force_hold_duration_range_s = (2.0, 4.0)
         force_ramp_down_duration_s = 0.4
+        force_ready_min_lift_height = 0.10
         stable_carry_policy_steps = 10
         max_force_events_per_episode = 1
 

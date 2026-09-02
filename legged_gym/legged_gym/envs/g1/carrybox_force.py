@@ -67,6 +67,7 @@ class LeggedRobot(CarryBox):
         self.force_event_count = torch.zeros(n, dtype=torch.long, device=device)
         self.force_event_decision_made = torch.zeros(n, dtype=torch.bool, device=device)
         self.force_stable_carry_streak = torch.zeros(n, dtype=torch.long, device=device)
+        self.force_last_hand_contacts = torch.zeros_like(self.last_hand_contacts)
         self.force_elapsed_physics_steps = torch.zeros(n, dtype=torch.long, device=device)
         self.force_remaining_physics_steps = torch.zeros(n, dtype=torch.long, device=device)
         self.force_ramp_up_steps = torch.zeros(n, dtype=torch.long, device=device)
@@ -288,10 +289,29 @@ class LeggedRobot(CarryBox):
             self.cfg.commands.max_yaw_rate,
         )
 
+    def _compute_force_ready_mask(self):
+        """Return environments with a lifted box and filtered bilateral contact."""
+        cfg = self.cfg.external_force
+        box_lift_height = (
+            self.box_states[:, 2]
+            - self._box_size[:, 2] / 2.0
+            - self.platform_pos[:, 2]
+        )
+        lifted = box_lift_height > float(cfg.force_ready_min_lift_height)
+
+        current_hand_contact = torch.norm(
+            self.contact_forces[:, self.hand_colli_indices], dim=-1
+        ) > self.cfg.rewards.hand_contact_threshold
+        filtered_hand_contact = current_hand_contact | self.force_last_hand_contacts
+        self.force_last_hand_contacts[:] = current_hand_contact
+        bilateral_contact = torch.all(filtered_hand_contact, dim=-1)
+        return lifted & bilateral_contact
+
     def _update_force_event_scheduler(self):
         cfg = self.cfg.external_force
+        force_ready_now = self._compute_force_ready_mask()
         self.force_stable_carry_streak[:] = torch.where(
-            self.is_stage_carry,
+            force_ready_now,
             self.force_stable_carry_streak + 1,
             torch.zeros_like(self.force_stable_carry_streak),
         )
@@ -553,6 +573,7 @@ class LeggedRobot(CarryBox):
         for name in (
             "external_force_active",
             "force_event_decision_made",
+            "force_last_hand_contacts",
             "_force_start_pending",
             "_force_hold_pending",
             "_force_end_pending",

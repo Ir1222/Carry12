@@ -94,6 +94,47 @@ def _load_force_schedule_method(quat_rotate):
     return namespace["_schedule_force_event"]
 
 
+def _load_force_method(method_name):
+    tree = ast.parse(FORCE_ENV_PATH.read_text(encoding="utf-8"))
+    force_class = next(
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "LeggedRobot"
+    )
+    method_node = next(
+        node
+        for node in force_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == method_name
+    )
+    namespace = {"torch": torch}
+    method_module = ast.Module(body=[method_node], type_ignores=[])
+    ast.fix_missing_locations(method_module)
+    exec(compile(method_module, str(FORCE_ENV_PATH), "exec"), namespace)
+    return namespace[method_name]
+
+
+def _force_ready_fixture(lift_height, hand_contacts):
+    lift_height = torch.as_tensor(lift_height, dtype=torch.float)
+    hand_contacts = torch.as_tensor(hand_contacts, dtype=torch.bool)
+    count = len(lift_height)
+    box_size = torch.full((count, 3), 0.4)
+    platform_pos = torch.zeros((count, 3))
+    box_states = torch.zeros((count, 13))
+    box_states[:, 2] = platform_pos[:, 2] + box_size[:, 2] / 2.0 + lift_height
+    contact_forces = torch.zeros((count, 2, 3))
+    contact_forces[:, :, 0] = hand_contacts.to(dtype=torch.float) * 2.0
+    return types.SimpleNamespace(
+        cfg=types.SimpleNamespace(
+            external_force=types.SimpleNamespace(force_ready_min_lift_height=0.10),
+            rewards=types.SimpleNamespace(hand_contact_threshold=1.0),
+        ),
+        box_states=box_states,
+        _box_size=box_size,
+        platform_pos=platform_pos,
+        contact_forces=contact_forces,
+        hand_colli_indices=torch.tensor([0, 1]),
+        force_last_hand_contacts=torch.zeros((count, 2), dtype=torch.bool),
+    )
+
+
 def _force_scheduler_fixture(rotated_directions):
     def quat_rotate(_box_quaternions, _direction_local):
         return rotated_directions.clone()
@@ -148,6 +189,88 @@ class TestForceProfile(unittest.TestCase):
         actual = smooth_force_profile(elapsed, ramp, hold, ramp)
         expected = torch.tensor([0.0, 0.5, 1.0, 1.0, 0.5, 0.0, 0.0])
         torch.testing.assert_close(actual, expected, atol=1.0e-6, rtol=0.0)
+
+
+class TestForceOnsetEligibility(unittest.TestCase):
+    def setUp(self):
+        self.compute_ready = _load_force_method("_compute_force_ready_mask")
+        self.update_scheduler = _load_force_method("_update_force_event_scheduler")
+
+    def test_lifted_box_with_bilateral_contact_is_ready(self):
+        scheduler = _force_ready_fixture([0.11], [[True, True]])
+
+        self.assertEqual(self.compute_ready(scheduler).tolist(), [True])
+
+    def test_missing_one_hand_expires_after_one_step_filter(self):
+        scheduler = _force_ready_fixture([0.11], [[True, True]])
+        self.assertEqual(self.compute_ready(scheduler).tolist(), [True])
+
+        scheduler.contact_forces[0, 1] = 0.0
+        self.assertEqual(self.compute_ready(scheduler).tolist(), [True])
+        self.assertEqual(self.compute_ready(scheduler).tolist(), [False])
+
+    def test_bilateral_contact_without_sufficient_lift_is_not_ready(self):
+        scheduler = _force_ready_fixture([0.09], [[True, True]])
+
+        self.assertEqual(self.compute_ready(scheduler).tolist(), [False])
+
+    def test_readiness_loss_beyond_filter_tolerance_resets_streak(self):
+        scheduler = _force_ready_fixture([0.11], [[True, True]])
+        scheduler.cfg.external_force.stable_carry_policy_steps = 10
+        scheduler.cfg.external_force.max_force_events_per_episode = 1
+        scheduler.cfg.external_force.force_event_probability = 1.0
+        scheduler.device = "cpu"
+        scheduler.force_stable_carry_streak = torch.zeros(1, dtype=torch.long)
+        scheduler.force_event_decision_made = torch.ones(1, dtype=torch.bool)
+        scheduler.force_event_count = torch.zeros(1, dtype=torch.long)
+        scheduler.force_remaining_physics_steps = torch.zeros(1, dtype=torch.long)
+        scheduler._compute_force_ready_mask = types.MethodType(self.compute_ready, scheduler)
+
+        for _ in range(3):
+            self.update_scheduler(scheduler)
+        self.assertEqual(scheduler.force_stable_carry_streak.tolist(), [3])
+
+        scheduler.contact_forces[0, 1] = 0.0
+        self.update_scheduler(scheduler)
+        self.assertEqual(scheduler.force_stable_carry_streak.tolist(), [4])
+        self.update_scheduler(scheduler)
+        self.assertEqual(scheduler.force_stable_carry_streak.tolist(), [0])
+
+    def test_active_event_is_not_cancelled_when_readiness_disappears(self):
+        scheduler = _force_ready_fixture([0.0], [[False, False]])
+        scheduler.cfg.external_force.stable_carry_policy_steps = 10
+        scheduler.cfg.external_force.max_force_events_per_episode = 1
+        scheduler.cfg.external_force.force_event_probability = 1.0
+        scheduler.device = "cpu"
+        scheduler.force_stable_carry_streak = torch.full((1,), 10, dtype=torch.long)
+        scheduler.force_event_decision_made = torch.ones(1, dtype=torch.bool)
+        scheduler.force_event_count = torch.ones(1, dtype=torch.long)
+        scheduler.force_remaining_physics_steps = torch.tensor([12], dtype=torch.long)
+        scheduler.force_phase = torch.tensor([1], dtype=torch.long)
+        scheduler._compute_force_ready_mask = types.MethodType(self.compute_ready, scheduler)
+
+        self.update_scheduler(scheduler)
+
+        self.assertEqual(scheduler.force_stable_carry_streak.tolist(), [0])
+        self.assertEqual(scheduler.force_remaining_physics_steps.tolist(), [12])
+        self.assertEqual(scheduler.force_phase.tolist(), [1])
+
+    def test_force_contact_memory_reset_is_scoped_to_env_ids(self):
+        tree = ast.parse(FORCE_ENV_PATH.read_text(encoding="utf-8"))
+        force_class = next(
+            node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "LeggedRobot"
+        )
+        reset_node = next(
+            node
+            for node in force_class.body
+            if isinstance(node, ast.FunctionDef) and node.name == "reset_idx"
+        )
+        reset_source = ast.get_source_segment(
+            FORCE_ENV_PATH.read_text(encoding="utf-8"), reset_node
+        )
+        self.assertIn('"force_last_hand_contacts"', reset_source)
+        self.assertIn("getattr(self, name)[env_ids] = False", reset_source)
+        self.assertNotIn("force_last_hand_contacts.zero_", reset_source)
 
 
 class TestForceDirectionScheduling(unittest.TestCase):
@@ -208,6 +331,7 @@ class TestManualForceCurriculum(unittest.TestCase):
         cfg = _formal_force_config()
         self.assertTrue(cfg["enable_external_force"])
         self.assertEqual(cfg["force_event_probability"], 1.0)
+        self.assertEqual(cfg["force_ready_min_lift_height"], 0.10)
         self.assertEqual(
             cfg["force_directions"],
             ("+box_x", "-box_x", "+box_y", "-box_y"),
