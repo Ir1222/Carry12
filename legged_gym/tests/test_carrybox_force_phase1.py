@@ -34,6 +34,14 @@ CONFIG_PATH = (
     / "g1"
     / "carrybox_force_config.py"
 )
+FORCE_ENV_PATH = (
+    REPO_ROOT
+    / "legged_gym"
+    / "legged_gym"
+    / "envs"
+    / "g1"
+    / "carrybox_force.py"
+)
 
 
 def _class_assignments(class_node):
@@ -65,6 +73,73 @@ def _formal_force_config():
     return _class_assignments(external_force)
 
 
+def _load_force_schedule_method(quat_rotate):
+    tree = ast.parse(FORCE_ENV_PATH.read_text(encoding="utf-8"))
+    force_class = next(
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "LeggedRobot"
+    )
+    method_node = next(
+        node
+        for node in force_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_schedule_force_event"
+    )
+    namespace = {
+        "torch": torch,
+        "quat_rotate": quat_rotate,
+        "sample_directional_beta": sample_directional_beta,
+    }
+    method_module = ast.Module(body=[method_node], type_ignores=[])
+    ast.fix_missing_locations(method_module)
+    exec(compile(method_module, str(FORCE_ENV_PATH), "exec"), namespace)
+    return namespace["_schedule_force_event"]
+
+
+def _force_scheduler_fixture(rotated_directions):
+    def quat_rotate(_box_quaternions, _direction_local):
+        return rotated_directions.clone()
+
+    schedule = _load_force_schedule_method(quat_rotate)
+    count = len(rotated_directions)
+    cfg = types.SimpleNamespace(
+        force_directions=("+box_x",),
+        curriculum_beta_ranges={1: {"+box_x": (0.2, 0.2)}},
+        curriculum_stage=1,
+        beta_range=None,
+        force_hold_duration_range_s=(0.04, 0.04),
+        force_ramp_up_duration_s=0.02,
+        force_ramp_down_duration_s=0.02,
+    )
+    scheduler = types.SimpleNamespace(
+        device="cpu",
+        cfg=types.SimpleNamespace(external_force=cfg),
+        _DIRECTION_LOCAL={"+box_x": (1.0, 0.0, 0.0)},
+        box_states=torch.zeros((count, 7)),
+        box_masses=torch.arange(1, count + 1, dtype=torch.float),
+        external_force_direction_world=torch.full((count, 3), 9.0),
+        external_force_beta=torch.zeros(count),
+        external_force_box_mass=torch.zeros(count),
+        external_force_peak_N=torch.zeros(count),
+        force_hold_duration_s=torch.zeros(count),
+        force_ramp_up_steps=torch.zeros(count, dtype=torch.long),
+        force_hold_steps=torch.zeros(count, dtype=torch.long),
+        force_ramp_down_steps=torch.zeros(count, dtype=torch.long),
+        force_elapsed_physics_steps=torch.zeros(count, dtype=torch.long),
+        force_remaining_physics_steps=torch.zeros(count, dtype=torch.long),
+        force_phase=torch.zeros(count, dtype=torch.long),
+        force_event_count=torch.zeros(count, dtype=torch.long),
+        force_event_decision_made=torch.ones(count, dtype=torch.bool),
+        force_stable_carry_streak=torch.full((count,), 10, dtype=torch.long),
+        _force_start_pending=torch.zeros(count, dtype=torch.bool),
+        FORCE_PHASE_RAMP_UP=1,
+        sim_params=types.SimpleNamespace(dt=0.02),
+        _uniform_sample=lambda value_range, sample_count: torch.full(
+            (sample_count,), float(value_range[0])
+        ),
+        _seconds_to_physics_steps=lambda duration_s: int(round(duration_s / 0.02)),
+    )
+    return schedule, scheduler
+
+
 class TestForceProfile(unittest.TestCase):
     def test_cosine_ramp_hold_and_down(self):
         elapsed = torch.tensor([0.0, 0.2, 0.4, 2.4, 2.6, 2.8, 2.81])
@@ -73,6 +148,54 @@ class TestForceProfile(unittest.TestCase):
         actual = smooth_force_profile(elapsed, ramp, hold, ramp)
         expected = torch.tensor([0.0, 0.5, 1.0, 1.0, 0.5, 0.0, 0.0])
         torch.testing.assert_close(actual, expected, atol=1.0e-6, rtol=0.0)
+
+
+class TestForceDirectionScheduling(unittest.TestCase):
+    def test_mixed_valid_and_invalid_directions_are_filtered_per_environment(self):
+        rotated_directions = torch.tensor(
+            [
+                [2.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, -3.0, 0.0],
+                [float("nan"), 0.0, 0.0],
+            ]
+        )
+        schedule, scheduler = _force_scheduler_fixture(rotated_directions)
+
+        schedule(scheduler, torch.arange(4))
+
+        torch.testing.assert_close(
+            scheduler.external_force_direction_world,
+            torch.tensor(
+                [
+                    [1.0, 0.0, 0.0],
+                    [9.0, 9.0, 9.0],
+                    [0.0, -1.0, 0.0],
+                    [9.0, 9.0, 9.0],
+                ]
+            ),
+        )
+        self.assertEqual(scheduler.force_event_count.tolist(), [1, 0, 1, 0])
+        self.assertEqual(scheduler._force_start_pending.tolist(), [True, False, True, False])
+        self.assertEqual(scheduler.force_event_decision_made.tolist(), [True, False, True, False])
+        self.assertEqual(scheduler.force_stable_carry_streak.tolist(), [10, 0, 10, 0])
+        self.assertEqual(scheduler.external_force_box_mass.tolist(), [1.0, 0.0, 3.0, 0.0])
+        self.assertNotIn(
+            "Box-frame force direction has a degenerate horizontal projection",
+            FORCE_ENV_PATH.read_text(encoding="utf-8"),
+        )
+
+    def test_all_invalid_directions_leave_no_scheduled_event(self):
+        schedule, scheduler = _force_scheduler_fixture(
+            torch.tensor([[0.0, 0.0, 1.0], [float("inf"), 0.0, 0.0]])
+        )
+
+        schedule(scheduler, torch.arange(2))
+
+        self.assertEqual(scheduler.force_event_count.tolist(), [0, 0])
+        self.assertEqual(scheduler.force_event_decision_made.tolist(), [False, False])
+        self.assertEqual(scheduler.force_stable_carry_streak.tolist(), [0, 0])
+        self.assertTrue(torch.all(scheduler.external_force_direction_world == 9.0))
 
 
 class TestManualForceCurriculum(unittest.TestCase):

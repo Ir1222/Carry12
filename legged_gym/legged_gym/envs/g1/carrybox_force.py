@@ -327,8 +327,21 @@ class LeggedRobot(CarryBox):
         direction_world = quat_rotate(self.box_states[env_ids, 3:7], direction_local)
         direction_world[:, 2] = 0.0
         direction_norm = torch.linalg.vector_norm(direction_world, dim=-1, keepdim=True)
-        if torch.any(direction_norm <= 1.0e-6):
-            raise RuntimeError("Box-frame force direction has a degenerate horizontal projection")
+        valid = (
+            torch.isfinite(direction_world).all(dim=-1)
+            & torch.isfinite(direction_norm.squeeze(-1))
+            & (direction_norm.squeeze(-1) > 1.0e-6)
+        )
+        invalid_env_ids = env_ids[~valid]
+        self.force_event_decision_made[invalid_env_ids] = False
+        self.force_stable_carry_streak[invalid_env_ids] = 0
+
+        env_ids = env_ids[valid]
+        if len(env_ids) == 0:
+            return
+        direction_ids = direction_ids[valid]
+        direction_world = direction_world[valid]
+        direction_norm = direction_norm[valid]
         direction_world = direction_world / direction_norm
 
         beta = sample_directional_beta(
