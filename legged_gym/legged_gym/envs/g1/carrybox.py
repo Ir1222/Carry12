@@ -415,9 +415,13 @@ class LeggedRobot(BaseTask):
             name = self.reward_names[i]
             rew = self.reward_functions[i]() * self.reward_scales[name]
 
-            if torch.isnan(rew).any():
-                print(name)
-                import ipdb; ipdb.set_trace()
+            finite_mask = torch.isfinite(rew)
+            if not finite_mask.all():
+                bad_env_ids = torch.nonzero(~finite_mask, as_tuple=False).flatten()
+                raise RuntimeError(
+                    f"Non-finite reward detected in '{name}'; "
+                    f"bad env ids={bad_env_ids[:20].tolist()}"
+                )
 
             self.rew_buf += rew
             self.episode_sums[name] += rew
@@ -455,7 +459,8 @@ class LeggedRobot(BaseTask):
             box_quat = self.box_states[:, 3:7].clone()
             box_quat[is_coarse] = self.default_quat
             vec = torch_rand_float(0, 1, (self.num_envs, 3), device=self.device).squeeze(1)
-            axis = vec / vec.norm(dim=-1, keepdim=True)
+            axis_norm = torch.clamp(vec.norm(dim=-1, keepdim=True), min=1.0e-6)
+            axis = vec / axis_norm
             angle = torch_rand_float(-self.box_cfg.ang_noise_scale, self.box_cfg.ang_noise_scale, (self.num_envs, 1), device=self.device).squeeze(1)
             box_quat = quat_mul(box_quat, quat_from_angle_axis(angle, axis))
             box_quat_local = quat_mul(quat_conjugate(self.rigid_body_states[:, self.upper_body_index, 3:7]), box_quat)
