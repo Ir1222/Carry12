@@ -67,6 +67,11 @@ yaw_rate = 0
 
 ---
 
+## No Force Version
+```bash
+python3 experiments/carrybox_clean_perturb/evaluate.py --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Aug29_15-54-01_stage1_UpAndWalk/model_19000.pt --no_force
+```
+
 ## Single No-Force Baseline
 
 For comparing the same controlled evaluation environment without external force.
