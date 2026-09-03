@@ -1767,10 +1767,13 @@ class LeggedRobot(BaseTask):
         return self.carry_tracking_active
 
     def _box_lift_height(self):
-        return (
-            self.box_states[:, 2]
-            - self._box_size[:, 2] / 2.0
-            - self.platform_pos[:, 2])
+        box_bottom_z = self.box_states[:, 2] - self._box_size[:, 2] / 2.0
+        platform_top_z = self.platform_pos[:, 2] + self._platform_height / 2.0
+        # CarryBox currently uses a flat plane. Use a terrain height query here
+        # if the task is extended to uneven terrain.
+        ground_z = self.env_origins[:, 2]
+        support_z = torch.maximum(platform_top_z, ground_z)
+        return box_bottom_z - support_z
 
     def _update_hand_contact_filter(self):
         """One-step contact persistence to reject isolated PhysX contact gaps."""

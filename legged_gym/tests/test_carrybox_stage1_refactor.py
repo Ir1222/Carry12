@@ -49,7 +49,9 @@ def _gate_fixture():
         cfg=types.SimpleNamespace(rewards=rewards, commands=commands_cfg),
         box_states=torch.zeros((1, 13)),
         _box_size=torch.tensor([[0.4, 0.4, 0.4]]),
-        platform_pos=torch.zeros((1, 3)),
+        platform_pos=torch.tensor([[0.0, 0.0, -5.0]]),
+        _platform_height=0.02,
+        env_origins=torch.zeros((1, 3)),
         hand_contact_filt=torch.zeros((1, 2), dtype=torch.bool),
         carry_tracking_active=torch.zeros(1, dtype=torch.bool),
         entering_carry_tracking=torch.zeros(1, dtype=torch.bool),
@@ -78,6 +80,39 @@ def _gate_fixture():
         {"wrap_to_pi": lambda value: torch.remainder(value + torch.pi, 2 * torch.pi) - torch.pi},
     )
     return env
+
+
+class TestSupportSurfaceLiftHeight(unittest.TestCase):
+    def test_underground_platform_and_grounded_box_has_zero_lift(self):
+        env = _gate_fixture()
+        env.box_states[:, 2] = env._box_size[:, 2] / 2.0
+
+        lift_height = env._box_lift_height()
+
+        torch.testing.assert_close(lift_height, torch.zeros_like(lift_height))
+        self.assertLess(lift_height.item(), 0.1)
+
+    def test_bilateral_contact_before_sufficient_lift_does_not_enter_carry(self):
+        env = _gate_fixture()
+        env.box_states[:, 2] = env._box_size[:, 2] / 2.0 + 0.02
+        env.hand_contact_filt[:] = True
+
+        for _ in range(12):
+            env._update_carry_tracking_state()
+
+        self.assertFalse(env.carry_tracking_active.item())
+        self.assertEqual(env.carry_tracking_entry_count.item(), 0.0)
+
+    def test_carrywith_like_held_state_enters_after_stable_steps(self):
+        env = _gate_fixture()
+        env.box_states[:, 2] = env._box_size[:, 2] / 2.0 + 0.30
+        env.hand_contact_filt[:] = True
+
+        for _ in range(10):
+            env._update_carry_tracking_state()
+
+        self.assertTrue(env.carry_tracking_active.item())
+        self.assertEqual(env.carry_tracking_entry_count.item(), 1.0)
 
 
 class TestEpisodeCommandLifecycle(unittest.TestCase):

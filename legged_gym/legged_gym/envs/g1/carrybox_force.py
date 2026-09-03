@@ -241,11 +241,7 @@ class LeggedRobot(CarryBox):
     def _compute_force_ready_mask(self):
         """Return environments with a lifted box and filtered bilateral contact."""
         cfg = self.cfg.external_force
-        box_lift_height = (
-            self.box_states[:, 2]
-            - self._box_size[:, 2] / 2.0
-            - self.platform_pos[:, 2]
-        )
+        box_lift_height = self._box_lift_height()
         lifted = box_lift_height > float(cfg.force_ready_min_lift_height)
 
         current_hand_contact = torch.norm(

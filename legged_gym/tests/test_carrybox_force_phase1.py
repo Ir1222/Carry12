@@ -42,6 +42,7 @@ FORCE_ENV_PATH = (
     / "g1"
     / "carrybox_force.py"
 )
+STAGE1_ENV_PATH = FORCE_ENV_PATH.with_name("carrybox.py")
 
 
 def _class_assignments(class_node):
@@ -111,17 +112,35 @@ def _load_force_method(method_name):
     return namespace[method_name]
 
 
+def _load_stage1_method(method_name):
+    tree = ast.parse(STAGE1_ENV_PATH.read_text(encoding="utf-8"))
+    stage1_class = next(
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "LeggedRobot"
+    )
+    method_node = next(
+        node
+        for node in stage1_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == method_name
+    )
+    namespace = {"torch": torch}
+    method_module = ast.Module(body=[method_node], type_ignores=[])
+    ast.fix_missing_locations(method_module)
+    exec(compile(method_module, str(STAGE1_ENV_PATH), "exec"), namespace)
+    return namespace[method_name]
+
+
 def _force_ready_fixture(lift_height, hand_contacts):
     lift_height = torch.as_tensor(lift_height, dtype=torch.float)
     hand_contacts = torch.as_tensor(hand_contacts, dtype=torch.bool)
     count = len(lift_height)
     box_size = torch.full((count, 3), 0.4)
     platform_pos = torch.zeros((count, 3))
+    platform_pos[:, 2] = -5.0
     box_states = torch.zeros((count, 13))
-    box_states[:, 2] = platform_pos[:, 2] + box_size[:, 2] / 2.0 + lift_height
+    box_states[:, 2] = box_size[:, 2] / 2.0 + lift_height
     contact_forces = torch.zeros((count, 2, 3))
     contact_forces[:, :, 0] = hand_contacts.to(dtype=torch.float) * 2.0
-    return types.SimpleNamespace(
+    fixture = types.SimpleNamespace(
         cfg=types.SimpleNamespace(
             external_force=types.SimpleNamespace(force_ready_min_lift_height=0.10),
             rewards=types.SimpleNamespace(hand_contact_threshold=1.0),
@@ -129,10 +148,16 @@ def _force_ready_fixture(lift_height, hand_contacts):
         box_states=box_states,
         _box_size=box_size,
         platform_pos=platform_pos,
+        _platform_height=0.02,
+        env_origins=torch.zeros((count, 3)),
         contact_forces=contact_forces,
         hand_colli_indices=torch.tensor([0, 1]),
         force_last_hand_contacts=torch.zeros((count, 2), dtype=torch.bool),
     )
+    fixture._box_lift_height = types.MethodType(
+        _load_stage1_method("_box_lift_height"), fixture
+    )
+    return fixture
 
 
 def _force_scheduler_fixture(rotated_directions):
