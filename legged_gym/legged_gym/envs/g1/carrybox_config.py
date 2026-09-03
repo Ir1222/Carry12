@@ -15,7 +15,7 @@ class G1Cfg(LeggedRobotCfg):
 
         env_spacing = 10. # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
-        episode_length_s = 20 # episode length in seconds
+        episode_length_s = 30 # episode length in seconds
 
         action_curriculum = False
         test = False
@@ -250,10 +250,9 @@ class G1Cfg(LeggedRobotCfg):
     class commands(LeggedRobotCfg.commands):
         curriculum = False
         resampling_time = 0.0
-        resample_carry_commands = True
-        carry_resample_interval_s = [1.5, 3.0]
-        carry_stop_probability = 0.0
-        carry_moving_vx_range = [0.1, 0.8]
+        # Stage1-A samples one nominal command at episode reset and keeps it for
+        # approach, pickup/recovery, and carrying. There is no intra-episode
+        # command resampling.
         carry_turn_probability = 0.4
         carry_turn_yaw_range = [0.1, 0.4]
         heading_kp = 1.0
@@ -264,7 +263,8 @@ class G1Cfg(LeggedRobotCfg):
         ang_vel_clip = 0.1
 
         class ranges:
-            lin_vel_x = [0.0, 0.8]
+            # Stage1-B/C can widen this single source of truth later.
+            lin_vel_x = [0.4, 1.0]
             lin_vel_y = [0.0, 0.0]
             ang_vel_yaw = [-0.4, 0.4]
             heading = [0.0, 0.0]
@@ -282,14 +282,15 @@ class G1Cfg(LeggedRobotCfg):
 
             ## task rewards
             walk_task = 1.0
+            approach_velocity_tracking = 2.0
             carryup_task = 1.0
+            carry_height_task = 1.0
             carry_velocity_task = 1.0
             carry_heading_hold = 0.3
             carry_contact_task = 0.5
 
         # walk
-        robot2object_pos = 0.0
-        robot2object_vel = 1.0
+        robot2object_pos = 1.0
         start_heading = 0.5
 
         # carryup
@@ -298,7 +299,7 @@ class G1Cfg(LeggedRobotCfg):
         box_height = 2.0
 
         # carry velocity tracking
-        carry_lin_vel = 1.0
+        carry_lin_vel = 2.0
         carry_yaw_vel = 0.5
         carry_heading_sigma = 0.25
         carry_heading_huber_delta = 0.35
@@ -310,11 +311,15 @@ class G1Cfg(LeggedRobotCfg):
         carry_robot2object_pos = 0.5
         hand_contact_threshold = 1.0
 
-        target_speed_loco = 0.85
         thresh_robot2object = 0.7
-        thresh_carryup_height = 0.05
-        thresh_carry_start_displacement = 0.5
         target_box_height = 0.72
+
+        # Dynamic physical gate for carry velocity/heading tracking. The
+        # lower exit height and debounced contact loss provide hysteresis.
+        carry_tracking_enter_min_lift_height = 0.10
+        carry_tracking_enter_stable_steps = 10
+        carry_tracking_exit_min_lift_height = 0.05
+        carry_tracking_exit_contact_loss_steps = 5
 
     class normalization:
         class obs_scales:

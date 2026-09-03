@@ -8,8 +8,6 @@ import torch
 from isaacgym import gymapi, gymtorch
 from isaacgym.torch_utils import quat_rotate
 
-from legged_gym.utils.math import wrap_to_pi
-
 from .carrybox import LeggedRobot as CarryBox
 from .carrybox_force_utils import (
     compute_admittance_teacher,
@@ -229,65 +227,16 @@ class LeggedRobot(CarryBox):
             self._force_end_pending[ended_ids] = True
 
     def _update_carry_heading_commands(self):
+        # Stage1 owns the complete nominal command lifecycle. Stage2 only
+        # schedules forces and derives reward-only teacher targets from it.
+        super()._update_carry_heading_commands()
         if not bool(self.cfg.external_force.enable_external_force):
-            super()._update_carry_heading_commands()
             self._set_teacher_to_nominal()
             return
 
-        self._update_nominal_commands_with_force_resample_deferral()
         self._update_force_event_scheduler()
         self._update_teacher_targets()
         self._log_force_debug()
-
-    def _update_nominal_commands_with_force_resample_deferral(self):
-        """Stage1 heading controller with its resample timer paused during force."""
-        self.carry_policy_commands[:, :3] = self.commands[:, :3]
-        self.carry_policy_commands[:, 1] = 0.0
-        self.carry_heading_error.zero_()
-
-        entering_carry = self.is_stage_carry & ~self.carry_heading_initialized
-        if entering_carry.any():
-            if self.cfg.commands.resample_carry_commands:
-                entering_env_ids = entering_carry.nonzero(as_tuple=False).flatten()
-                self._resample_carry_commands(entering_env_ids)
-                self._sample_carry_command_resample_time(entering_env_ids)
-                self.carry_policy_commands[entering_env_ids, :3] = self.commands[entering_env_ids, :3]
-                self.carry_policy_commands[entering_env_ids, 1] = 0.0
-            self.carry_heading_ref[entering_carry] = self.yaw[entering_carry]
-            self.carry_heading_initialized[entering_carry] = True
-
-        force_in_progress = (self.force_remaining_physics_steps > 0) | self.external_force_active
-        resample_mask = (
-            self.is_stage_carry
-            & self.carry_heading_initialized
-            & ~entering_carry
-            & ~force_in_progress
-        )
-        if self.cfg.commands.resample_carry_commands:
-            self.carry_command_resample_time[resample_mask] -= self.dt
-            due_env_ids = (
-                resample_mask & (self.carry_command_resample_time <= 0.0)
-            ).nonzero(as_tuple=False).flatten()
-            if len(due_env_ids) > 0:
-                self._resample_carry_commands(due_env_ids)
-                self._sample_carry_command_resample_time(due_env_ids)
-                self.carry_policy_commands[due_env_ids, :3] = self.commands[due_env_ids, :3]
-                self.carry_policy_commands[due_env_ids, 1] = 0.0
-
-        carry_mask = self.is_stage_carry & self.carry_heading_initialized
-        self.carry_heading_ref[carry_mask] = wrap_to_pi(
-            self.carry_heading_ref[carry_mask]
-            + self.commands[carry_mask, 2] * self.dt
-        )
-        self.carry_heading_error[carry_mask] = wrap_to_pi(
-            self.carry_heading_ref[carry_mask] - self.yaw[carry_mask]
-        )
-        self.carry_policy_commands[carry_mask, 2] = torch.clip(
-            self.commands[carry_mask, 2]
-            + self.cfg.commands.heading_kp * self.carry_heading_error[carry_mask],
-            -self.cfg.commands.max_yaw_rate,
-            self.cfg.commands.max_yaw_rate,
-        )
 
     def _compute_force_ready_mask(self):
         """Return environments with a lifted box and filtered bilateral contact."""
@@ -462,7 +411,7 @@ class LeggedRobot(CarryBox):
             self.cfg.rewards.carry_lin_vel * lin_vel_reward
             + self.cfg.rewards.carry_yaw_vel * yaw_vel_reward
         )
-        carry_reward[~self.is_stage_carry] = 0.0
+        carry_reward[~self.carry_tracking_active] = 0.0
         return carry_reward
 
     def _reward_carry_heading_hold(self):
@@ -484,7 +433,7 @@ class LeggedRobot(CarryBox):
             - self.cfg.rewards.carry_heading_huber_weight
             * heading_huber_error_normalized
         )
-        heading_reward[~self.is_stage_carry] = 0.0
+        heading_reward[~self.carry_tracking_active] = 0.0
         return heading_reward
 
     def _log_force_debug(self):
