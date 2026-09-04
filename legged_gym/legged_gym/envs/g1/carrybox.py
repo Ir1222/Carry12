@@ -336,7 +336,7 @@ class LeggedRobot(BaseTask):
         self.carry_heading_ref[env_ids] = 0.0
         self.carry_heading_error[env_ids] = 0.0
         self.carry_heading_initialized[env_ids] = False
-        self.carry_command_resample_time[env_ids] = 0.0
+        self.carry_yaw_resample_time[env_ids] = 0.0
         self.carry_policy_commands[env_ids, :3] = self.commands[env_ids, :3]
         self.carry_policy_commands[env_ids, 1] = 0.0
         self.reset_buf[env_ids] = 1
@@ -725,33 +725,35 @@ class LeggedRobot(BaseTask):
         # set small commands to zero
         self.commands[env_ids, :2] *= torch.abs(self.commands[env_ids, 0:1]) > self.cfg.commands.lin_vel_clip
 
-    def _resample_carry_commands(self, env_ids):
-        """Sample raw carrying commands with explicit stop and straight segments."""
+    def _sample_episode_vx_commands(self, env_ids):
+        """Sample forward speed once; this value stays fixed for the episode."""
         if len(env_ids) == 0:
             return
         self.commands[env_ids, :] = 0.0
-        moving_mask = torch.rand(len(env_ids), device=self.device) >= self.cfg.commands.carry_stop_probability
-        moving_env_ids = env_ids[moving_mask]
-        if len(moving_env_ids) > 0:
-            self.commands[moving_env_ids, 0] = torch_rand_float(
-                self.cfg.commands.carry_moving_vx_range[0],
-                self.cfg.commands.carry_moving_vx_range[1],
-                (len(moving_env_ids), 1), device=self.device).squeeze(1)
+        self.commands[env_ids, 0] = torch_rand_float(
+            self.cfg.commands.carry_moving_vx_range[0],
+            self.cfg.commands.carry_moving_vx_range[1],
+            (len(env_ids), 1), device=self.device).squeeze(1)
 
-            turning_mask = torch.rand(len(moving_env_ids), device=self.device) < self.cfg.commands.carry_turn_probability
-            turning_env_ids = moving_env_ids[turning_mask]
-            if len(turning_env_ids) > 0:
-                yaw_magnitude = torch_rand_float(
-                    self.cfg.commands.carry_turn_yaw_range[0],
-                    self.cfg.commands.carry_turn_yaw_range[1],
-                    (len(turning_env_ids), 1), device=self.device).squeeze(1)
-                yaw_sign = torch.where(torch.rand(len(turning_env_ids), device=self.device) < 0.5, -1.0, 1.0)
-                self.commands[turning_env_ids, 2] = yaw_magnitude * yaw_sign
+    def _resample_carry_yaw_commands(self, env_ids):
+        """Sample only raw carry yaw; never modify the episode vx command."""
+        if len(env_ids) == 0:
+            return
+        self.commands[env_ids, 2] = 0.0
+        turning_mask = torch.rand(len(env_ids), device=self.device) < self.cfg.commands.carry_turn_probability
+        turning_env_ids = env_ids[turning_mask]
+        if len(turning_env_ids) > 0:
+            yaw_magnitude = torch_rand_float(
+                self.cfg.commands.carry_turn_yaw_range[0],
+                self.cfg.commands.carry_turn_yaw_range[1],
+                (len(turning_env_ids), 1), device=self.device).squeeze(1)
+            yaw_sign = torch.where(torch.rand(len(turning_env_ids), device=self.device) < 0.5, -1.0, 1.0)
+            self.commands[turning_env_ids, 2] = yaw_magnitude * yaw_sign
 
-    def _sample_carry_command_resample_time(self, env_ids):
-        self.carry_command_resample_time[env_ids] = torch_rand_float(
-            self.cfg.commands.carry_resample_interval_s[0],
-            self.cfg.commands.carry_resample_interval_s[1],
+    def _sample_carry_yaw_resample_time(self, env_ids):
+        self.carry_yaw_resample_time[env_ids] = torch_rand_float(
+            self.cfg.commands.carry_yaw_resample_interval_s[0],
+            self.cfg.commands.carry_yaw_resample_interval_s[1],
             (len(env_ids), 1), device=self.device).squeeze(1)
 
     def _update_carry_heading_commands(self):
@@ -764,8 +766,8 @@ class LeggedRobot(BaseTask):
         if entering_carry.any():
             if self.cfg.commands.resample_carry_commands:
                 entering_env_ids = entering_carry.nonzero(as_tuple=False).flatten()
-                self._resample_carry_commands(entering_env_ids)
-                self._sample_carry_command_resample_time(entering_env_ids)
+                self._resample_carry_yaw_commands(entering_env_ids)
+                self._sample_carry_yaw_resample_time(entering_env_ids)
                 self.carry_policy_commands[entering_env_ids, :3] = self.commands[entering_env_ids, :3]
                 self.carry_policy_commands[entering_env_ids, 1] = 0.0
             self.carry_heading_ref[entering_carry] = self.yaw[entering_carry]
@@ -773,11 +775,11 @@ class LeggedRobot(BaseTask):
 
         resample_mask = self.is_stage_carry & self.carry_heading_initialized & ~entering_carry
         if self.cfg.commands.resample_carry_commands:
-            self.carry_command_resample_time[resample_mask] -= self.dt
-            due_env_ids = (resample_mask & (self.carry_command_resample_time <= 0.0)).nonzero(as_tuple=False).flatten()
+            self.carry_yaw_resample_time[resample_mask] -= self.dt
+            due_env_ids = (resample_mask & (self.carry_yaw_resample_time <= 0.0)).nonzero(as_tuple=False).flatten()
             if len(due_env_ids) > 0:
-                self._resample_carry_commands(due_env_ids)
-                self._sample_carry_command_resample_time(due_env_ids)
+                self._resample_carry_yaw_commands(due_env_ids)
+                self._sample_carry_yaw_resample_time(due_env_ids)
                 self.carry_policy_commands[due_env_ids, :3] = self.commands[due_env_ids, :3]
                 self.carry_policy_commands[due_env_ids, 1] = 0.0
 
@@ -960,7 +962,10 @@ class LeggedRobot(BaseTask):
     def _reset_task(self, env_ids):
         self.tar_platform_states[env_ids] = self.tar_platform_default_states[env_ids]
         if self.cfg.commands.resample_carry_commands:
-            self._resample_carry_commands(env_ids)
+            self._sample_episode_vx_commands(env_ids)
+        else:
+            # Preserve an externally supplied vx while enforcing pre-carry yaw=0.
+            self.commands[env_ids, 1:] = 0.0
         # No need reset validation in every episode
         # tar_platform_rel_z = self.tar_platform_pos[env_ids, 2] - self.env_origins[env_ids, 2]
         # assert torch.all(tar_platform_rel_z < -4.0).item(), "tar_platform must remain underground in carrybox no-relocation reset"
@@ -1116,7 +1121,7 @@ class LeggedRobot(BaseTask):
         self.carry_heading_ref = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.carry_heading_error = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.carry_heading_initialized = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
-        self.carry_command_resample_time = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.carry_yaw_resample_time = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
         self.first_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
@@ -1694,6 +1699,8 @@ class LeggedRobot(BaseTask):
         self.obs_scales = self.cfg.normalization.obs_scales
         self.reward_scales = class_to_dict(self.cfg.rewards.scales)
         self.command_ranges = class_to_dict(self.cfg.commands.ranges)
+        if self.cfg.commands.carry_moving_vx_range[0] <= 0.0:
+            raise ValueError("carry_moving_vx_range must have a strictly positive lower bound.")
         if self.cfg.terrain.mesh_type not in ['heightfield', 'trimesh']:
             self.cfg.terrain.curriculum = False
         self.max_episode_length_s = self.cfg.env.episode_length_s
@@ -1999,7 +2006,8 @@ class LeggedRobot(BaseTask):
         robot2object_pos_reward = torch.exp(-0.5 * self.robot2object_dist)
         global_lin_vel = self.rigid_body_states[:, self.upper_body_index, 7:10]
         robot2object_vel = torch.sum(normalize(self.robot2object_dir) * global_lin_vel[:, :2], dim=-1)
-        robot2object_vel_reward = torch.exp(-5 * torch.square(self.cfg.rewards.target_speed_loco - robot2object_vel))
+        target_speed = self.carry_policy_commands[:, 0]
+        robot2object_vel_reward = torch.exp(-5 * torch.square(target_speed - robot2object_vel))
 
         forward = quat_apply(self.base_quat, self.forward_vec)
         heading = torch.atan2(forward[:, 1], forward[:, 0])

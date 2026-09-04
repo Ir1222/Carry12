@@ -152,6 +152,10 @@ def get_load_path(root, load_run=-1, checkpoint=-1):
 
 
 def update_cfg_from_args(env_cfg, cfg_train, args):
+    finetune_path = getattr(args, "finetune_path", None)
+    if args.resume and finetune_path is not None:
+        raise ValueError("--resume and --finetune_path are mutually exclusive.")
+
     # seed
     if env_cfg is not None:
         # num envs
@@ -175,6 +179,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             cfg_train.runner.resume = args.resume
         if args.resume_path is not None:
             cfg_train.runner.resume_path = args.resume_path
+        if finetune_path is not None:
+            cfg_train.runner.finetune_path = finetune_path
         if args.experiment_name is not None:
             cfg_train.runner.experiment_name = args.experiment_name
         if args.run_name is not None:
@@ -191,6 +197,7 @@ def get_args():
         {"name": "--task", "type": str, "default": "g1", "help": "Resume training or start testing from a checkpoint. Overrides config file if provided."},
         {"name": "--resume", "action": "store_true", "default": False,  "help": "Resume training from a checkpoint"},
         {"name": "--resume_path", "type": str,  "help": "Path to the directory where the run to be resumed is located."},
+        {"name": "--finetune_path", "type": str, "help": "Checkpoint used to initialize a new finetune run without restoring optimizer or iteration state."},
         {"name": "--experiment_name", "type": str,  "help": "Name of the experiment to run or load. Overrides config file if provided."},
         {"name": "--run_name", "type": str,  "help": "Name of the run. Overrides config file if provided."},
         {"name": "--load_run", "type": str,  "help": "Name of the run to load when resume=True. If -1: will load the last run. Overrides config file if provided."},
@@ -426,5 +433,3 @@ class Return_Onnx(torch.nn.Module):
             output_names=["estvalues"],
             dynamic_axes={},
         )
-        
-    

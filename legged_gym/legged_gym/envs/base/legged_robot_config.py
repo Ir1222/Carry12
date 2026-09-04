@@ -370,3 +370,4 @@ class LeggedRobotCfgPPO(BaseConfig):
         load_run = -1 # -1 = last run
         checkpoint = -1 # -1 = last saved model
         resume_path = None # updated from load_run and chkpt
+        finetune_path = None # initialize model/AMP only; keep fresh optimizer and iteration state

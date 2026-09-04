@@ -314,6 +314,26 @@ class HIMOnPolicyRunner:
         self.current_learning_iteration = loaded_dict['iter']
         return loaded_dict['infos']
 
+    def load_finetune(self, path):
+        loaded_dict = torch.load(path, map_location=self.device)
+        required_keys = {'model_state_dict', 'amp_state_dict'}
+        missing_keys = required_keys.difference(loaded_dict)
+        if missing_keys:
+            missing = ', '.join(sorted(missing_keys))
+            raise KeyError(f"Finetune checkpoint is missing required state: {missing}")
+
+        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
+        print(f"[Finetune] Loaded actor/critic from {path}")
+        self.alg.amp.load_state_dict(loaded_dict['amp_state_dict'])
+        print("[Finetune] Loaded AMP discriminator")
+
+        # The optimizer was freshly constructed from the current config and is
+        # intentionally not restored from the source checkpoint.
+        self.current_learning_iteration = 0
+        print("[Finetune] Optimizer state reset (checkpoint optimizer was NOT restored)")
+        print("[Finetune] Starting new run from iteration 0")
+        return loaded_dict.get('infos')
+
     def get_inference_policy(self, device=None):
         self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
         if device is not None:

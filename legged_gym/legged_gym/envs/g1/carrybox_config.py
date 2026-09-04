@@ -15,7 +15,7 @@ class G1Cfg(LeggedRobotCfg):
 
         env_spacing = 10. # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
-        episode_length_s = 20 # episode length in seconds
+        episode_length_s = 30 # episode length in seconds
 
         action_curriculum = False
         test = False
@@ -182,7 +182,7 @@ class G1Cfg(LeggedRobotCfg):
             hybrid_init_prob = 0.8  # prob of random, for hybrid mode
 
             skill = ["loco", "pickUp", "carryWith"]
-            skill_init_prob = [0.8, 0.2, 0.2]
+            skill_init_prob = [0.4, 0.2, 0.6]
 
             box_termination = False
             thresh_tag = [0.7, 2.0]
@@ -250,11 +250,11 @@ class G1Cfg(LeggedRobotCfg):
     class commands(LeggedRobotCfg.commands):
         curriculum = False
         resampling_time = 0.0
+        # This gate controls carry-stage yaw sampling; episode vx is sampled at reset.
         resample_carry_commands = True
-        carry_resample_interval_s = [1.5, 3.0]
-        carry_stop_probability = 0.0
-        carry_moving_vx_range = [0.1, 0.8]
-        carry_turn_probability = 0.4
+        carry_yaw_resample_interval_s = [4.0, 6.0]
+        carry_moving_vx_range = [0.1, 1.2]
+        carry_turn_probability = 0.6
         carry_turn_yaw_range = [0.1, 0.4]
         heading_kp = 1.0
         max_yaw_rate = 0.4
@@ -310,7 +310,6 @@ class G1Cfg(LeggedRobotCfg):
         carry_robot2object_pos = 0.5
         hand_contact_threshold = 1.0
 
-        target_speed_loco = 0.85
         thresh_robot2object = 0.7
         thresh_carryup_height = 0.05
         thresh_carry_start_displacement = 0.5
@@ -376,6 +375,7 @@ class G1Cfg(LeggedRobotCfg):
 class G1CfgPPO( LeggedRobotCfgPPO ):
     class algorithm( LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
+        learning_rate = 5.e-4
     class runner( LeggedRobotCfgPPO.runner ):
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'HIMPPO'
