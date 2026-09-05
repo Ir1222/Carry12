@@ -1,5 +1,84 @@
 # Clean CarryBox Perturbation Evaluator
 
+## NForce：velocity-tracking 分支的无外力速度评估
+
+`evaluator_NForce.py` 从 main 的 `27eca09` 迁移，使用当前
+`velocity-tracking` 分支的 `carrybox` 环境、`G1Cfg/G1CfgPPO` 和 actor 网络。
+将 `--resume_path` 换成该分支训练的 `task=carrybox` checkpoint 即可运行：
+
+```bash
+python3 experiments/carrybox_clean_perturb/evaluator_NForce.py \
+  --resume_path /path/to/velocity-tracking/carrybox/model_XXXXX.pt \
+  --command 0.4,0.0,0.0 \
+  --seed 1 \
+  --steady_carry_warmup 0.20 \
+  --steady_duration 5.0 \
+  --save_csv
+```
+
+此入口始终评估 carrybox 的无外力搬运，不需要 `--task`、`--no_force` 或
+`--sweep`。保留 `--headless` 等基础运行参数；`--finetune_path` 不用于推理，
+请用 `--resume_path` 指定唯一 checkpoint。加载时要求 `model_state_dict`
+内的 actor 权重完整且形状匹配（738 维输入、29 维动作），不加载 critic、
+AMP、优化器或训练迭代状态；critic、AMP 和优化器可以不包含在 checkpoint 中。
+
+### 评估流程和分支适配
+
+- 单环境、固定 nominal 初始场景，关闭 nominal 配置列出的随机化及观测噪声，
+  关闭外力事件、机器人扰动和推力。默认 episode 上限 30 秒；较长采样请求
+  自动使用 `max(30, 20 + warmup + duration)` 秒。
+- 固定原始 `(vx, vy, yaw_rate)`，关闭训练中的 episode 速度采样和搬运 yaw
+  重采样。reset 后直接使用环境生成的观测，不额外推进 actor 历史。
+- 保留本分支原有的命令转换：policy 的 `vy=0`，搬运中 yaw 命令包含本分支的
+  航向反馈与限幅。因此 raw command 与 policy command 可以不同；CSV 同时记录两者。
+- 保留本分支的 `is_stage_carry`（抬起或移离起点），再要求双手接触代理均大于
+  1 N、箱子与机器人相对线速度小于 1 m/s、箱子角速度小于 3 rad/s，连续
+  10 个 policy step 后确认搬运。没有引入 main 后续新增的训练阶段门槛。
+- 确认后再连续预热 0.20 秒，随后采样 5 秒。当前 policy dt 为 0.02 秒，
+  因此额外预热 10 步，完整 trace 为 250 行数据。任意时长沿用 main 的
+  `round(seconds / dt)` 量化规则，采样至少一步、预热允许零步。
+- 预热时丢失搬运确认会重新等待；开始采样后短暂失去确认仍继续记录，直到
+  采样完成、检测到失败或 episode 结束。失败可生成不足 5 秒的部分 trace。
+  `steady_carry_achieved=1` 只表示开始过采样；完整完成应检查
+  `termination_reason=steady_carry_complete` 和 `steady_carry_steps`。
+- 误差按 `base_lin_vel/base_ang_vel - carry_policy_commands` 计算，保留各轴
+  均值、标准差、MAE、RMSE、P95、最大误差、平面误差范数及航向/搬运诊断。
+  未开始采样时速度指标为 NaN；终止原因和最终 yaw 使用自动 reset 前的快照。
+
+### CSV 输出
+
+`--save_csv` 默认生成：
+
+```text
+experiments/carrybox_clean_perturb/results/<checkpoint父目录>_<checkpoint文件名去扩展名>/nforce_velocity/
+  summary.csv
+  traces/T0001.csv
+```
+
+保留 main 的表头与字段顺序；旧 summary 表头不匹配时拒绝追加。
+每次运行追加一行 summary，但同目录的 `traces/T0001.csv` 会覆盖。
+比较多个 seed 或命令时，使用不同的 `--output_dir` 保存各次 trace。
+不加 `--save_csv` 时只输出终端结果。
+
+### 离线验证与限制
+
+```bash
+python -m pytest -q experiments/carrybox_clean_perturb/tests
+# 或者，不依赖 pytest：
+python experiments/carrybox_clean_perturb/tests/run_unit_tests.py
+```
+
+测试覆盖指标与 CSV、模拟 rollout 状态机、终止快照、目标分支的 reset/命令
+更新方法，以及真实 ActorCritic 结构的合成 checkpoint 加载和动作一致性。
+涉及环境的 CPU 测试跳过 Isaac Gym 导入，执行选定的原始方法；它们不验证
+PhysX、viewer 或完整仿真初始化。
+
+迁移期间本机没有 Isaac Gym，也未提供新的实际 checkpoint；实际搬运能力、
+5 秒采样完成率和速度误差需在配置好的 Isaac Gym 环境中运行上述命令验证。
+迁移保持评估能力和指标口径，不要求不同 policy 的评估数值相同。
+
+以下内容为既有 `evaluate.py` 外力评估说明，与 NForce 入口分别使用。
+
 This experiment evaluates the current clean velocity-command CarryBox policy:
 
 ```text
