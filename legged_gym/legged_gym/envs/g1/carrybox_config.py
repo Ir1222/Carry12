@@ -182,7 +182,7 @@ class G1Cfg(LeggedRobotCfg):
             hybrid_init_prob = 0.8  # prob of random, for hybrid mode
 
             skill = ["loco", "pickUp", "carryWith"]
-            skill_init_prob = [0.4, 0.2, 0.6]
+            skill_init_prob = [0.6, 0.2, 0.4]
 
             box_termination = False
             thresh_tag = [0.7, 2.0]
@@ -252,9 +252,9 @@ class G1Cfg(LeggedRobotCfg):
         resampling_time = 0.0
         # This gate controls carry-stage yaw sampling; episode vx is sampled at reset.
         resample_carry_commands = True
-        carry_yaw_resample_interval_s = [4.0, 6.0]
+        carry_yaw_resample_interval_s = [1.5, 3.0]
         carry_moving_vx_range = [0.1, 1.2]
-        carry_turn_probability = 0.6
+        carry_turn_probability = 0.4
         carry_turn_yaw_range = [0.1, 0.4]
         heading_kp = 1.0
         max_yaw_rate = 0.4
@@ -375,7 +375,9 @@ class G1Cfg(LeggedRobotCfg):
 class G1CfgPPO( LeggedRobotCfgPPO ):
     class algorithm( LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
-        learning_rate = 5.e-4
+        # learning_rate = 5.e-4
+        learning_rate = 1.e-4
+        schedule = 'fixed'
     class runner( LeggedRobotCfgPPO.runner ):
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'HIMPPO'
