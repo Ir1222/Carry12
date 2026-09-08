@@ -336,11 +336,11 @@ def _print_heading_debug(env, policy_step, pelvis_yaw_rate):
 def _print_reward_debug(env, policy_step):
     """Print evaluator-local diagnostics matching the active carry reward formulas."""
     env_id = 0
-    tracking_sigma = float(env.cfg.rewards.tracking_sigma)
+    lin_vel_sigma = float(env.cfg.rewards.carry_lin_vel_sigma)
+    yaw_vel_sigma = float(env.cfg.rewards.carry_yaw_vel_sigma)
     carry_heading_sigma = float(env.cfg.rewards.carry_heading_sigma)
-    carry_lin_vel = float(env.cfg.rewards.carry_lin_vel)
-    carry_yaw_vel = float(env.cfg.rewards.carry_yaw_vel)
-    carry_velocity_scale = float(env.cfg.rewards.scales.carry_velocity_task)
+    carry_lin_vel_scale = float(env.cfg.rewards.scales.carry_lin_vel_tracking)
+    carry_yaw_vel_scale = float(env.cfg.rewards.scales.carry_yaw_vel_tracking)
     carry_heading_scale = float(env.cfg.rewards.scales.carry_heading_hold)
 
     lin_vel_error = torch.sum(
@@ -349,11 +349,10 @@ def _print_reward_debug(env, policy_step):
         )
     )
     yaw_vel_error = torch.square(
-        env.carry_policy_commands[env_id, 2] - env.base_ang_vel[env_id, 2]
+        env.commands[env_id, 2] - env.base_ang_vel[env_id, 2]
     )
-    lin_vel_reward = torch.exp(-lin_vel_error / tracking_sigma)
-    yaw_vel_reward = torch.exp(-yaw_vel_error / tracking_sigma)
-    carry_velocity_raw = carry_lin_vel * lin_vel_reward + carry_yaw_vel * yaw_vel_reward
+    lin_vel_reward = torch.exp(-lin_vel_error / lin_vel_sigma)
+    yaw_vel_reward = torch.exp(-yaw_vel_error / yaw_vel_sigma)
 
     heading_error = env.carry_heading_error[env_id]
     heading_hold_raw = torch.exp(-torch.square(heading_error) / carry_heading_sigma)
@@ -361,10 +360,12 @@ def _print_reward_debug(env, policy_step):
     # The environment gates both carry rewards before applying their configured scales.
     is_stage_carry = bool(env.is_stage_carry[env_id].item())
     if is_stage_carry:
-        carry_velocity_weighted = carry_velocity_scale * carry_velocity_raw
+        lin_vel_weighted = carry_lin_vel_scale * lin_vel_reward
+        yaw_vel_weighted = carry_yaw_vel_scale * yaw_vel_reward
         heading_hold_weighted = carry_heading_scale * heading_hold_raw
     else:
-        carry_velocity_weighted = torch.zeros_like(carry_velocity_raw)
+        lin_vel_weighted = torch.zeros_like(lin_vel_reward)
+        yaw_vel_weighted = torch.zeros_like(yaw_vel_reward)
         heading_hold_weighted = torch.zeros_like(heading_hold_raw)
 
     print(
@@ -373,8 +374,8 @@ def _print_reward_debug(env, policy_step):
         f"yaw_err={float(yaw_vel_error.item()):.4f} "
         f"lin_r={float(lin_vel_reward.item()):.4f} "
         f"yaw_r={float(yaw_vel_reward.item()):.4f} "
-        f"carry_raw={float(carry_velocity_raw.item()):.4f} "
-        f"carry_weighted={float(carry_velocity_weighted.item()):.4f} "
+        f"lin_weighted={float(lin_vel_weighted.item()):.4f} "
+        f"yaw_weighted={float(yaw_vel_weighted.item()):.4f} "
         f"heading_raw={float(heading_hold_raw.item()):.4f} "
         f"heading_weighted={float(heading_hold_weighted.item()):.4f}"
     )

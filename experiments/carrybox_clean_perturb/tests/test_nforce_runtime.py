@@ -119,8 +119,47 @@ def test_target_reset_and_heading_keep_raw_commands_without_resampling():
             env._update_carry_heading_commands()
             torch.testing.assert_close(env.commands[:, :3], torch.tensor([[0.4, 0.2, 0.1]]))
         assert env.carry_heading_error.item() > 0
-        assert math.isclose(env.carry_policy_commands[0, 2].item(), 0.4, abs_tol=1e-6)
+        assert math.isclose(env.carry_policy_commands[0, 2].item(), 0.1, abs_tol=1e-6)
         assert env.carry_policy_commands[0, 1].item() == 0.0
+
+
+def test_carry_velocity_rewards_are_independent_body_frame_terms():
+    env = command_env((0.4, 0.0, 0.2))
+    env._reset_task(torch.tensor([0]))
+    env.base_lin_vel = torch.tensor([[0.3, -0.2, 0.0]])
+    env.base_ang_vel = torch.tensor([[0.0, 0.0, 0.1]])
+    env.is_stage_carry[:] = True
+    env._update_carry_heading_commands()
+
+    expected_lin = torch.exp(torch.tensor(-((0.4 - 0.3) ** 2 + 0.2 ** 2) / 0.25))
+    expected_yaw = torch.exp(torch.tensor(-((0.2 - 0.1) ** 2) / 0.10))
+    torch.testing.assert_close(env._reward_carry_lin_vel_tracking(), expected_lin[None])
+    torch.testing.assert_close(env._reward_carry_yaw_vel_tracking(), expected_yaw[None])
+
+    # Zero yaw remains an active target rather than being masked as "not turning".
+    env.commands[:, 2] = 0.0
+    expected_zero_yaw = torch.exp(torch.tensor(-(0.0 - 0.1) ** 2 / 0.10))
+    torch.testing.assert_close(
+        env._reward_carry_yaw_vel_tracking(), expected_zero_yaw[None]
+    )
+
+    env.is_stage_carry[:] = False
+    torch.testing.assert_close(env._reward_carry_lin_vel_tracking(), torch.zeros(1))
+    torch.testing.assert_close(env._reward_carry_yaw_vel_tracking(), torch.zeros(1))
+
+
+def test_velocity_tracking_v2_config_and_actor_shape_are_checkpoint_compatible():
+    from nforce_test_support import carrybox_configs
+
+    cfg, _ = carrybox_configs()
+    assert cfg.rewards.scales.carry_velocity_task == 0.0
+    assert cfg.rewards.scales.carry_lin_vel_tracking == 1.0
+    assert cfg.rewards.scales.carry_yaw_vel_tracking == 0.75
+    assert cfg.rewards.scales.carry_heading_hold == 0.0
+    assert cfg.rewards.carry_lin_vel_sigma == 0.25
+    assert cfg.rewards.carry_yaw_vel_sigma == 0.10
+    assert cfg.env.num_actor_obs == 738
+    assert cfg.env.num_actions == 29
 
 
 def test_target_carry_gate_and_evaluator_contact_confirmation():

@@ -40,7 +40,7 @@ class _TensorStub:
 
 class _FakeEnv:
     commands = _TensorStub([[0.6, 0.2, 0.1, 0.0]])
-    carry_policy_commands = _TensorStub([[0.6, 0.0, 0.15, 0.0]])
+    carry_policy_commands = _TensorStub([[0.6, 0.0, 0.1, 0.0]])
     base_lin_vel = _TensorStub([[0.5, -0.1, 0.0]])
     base_ang_vel = _TensorStub([[0.0, 0.0, 0.05]])
     confirmed_carry_buf = _TensorStub([True])
@@ -77,7 +77,7 @@ def test_trace_errors_use_policy_command_and_body_velocity():
     assert math.isclose(row["vx_error_signed"], 0.5 - 0.6, abs_tol=1.0e-6)
     assert math.isclose(row["vy_error_signed"], -0.1 - 0.0, abs_tol=1.0e-6)
     assert math.isclose(
-        row["yaw_rate_error_signed"], 0.05 - 0.15, abs_tol=1.0e-6
+        row["yaw_rate_error_signed"], 0.05 - 0.1, abs_tol=1.0e-6
     )
     assert math.isclose(row["vx_error_abs"], abs(row["vx_error_signed"]))
     assert math.isclose(
@@ -86,6 +86,9 @@ def test_trace_errors_use_policy_command_and_body_velocity():
     )
     assert math.isclose(row["raw_command_vy"], 0.2)
     assert math.isclose(row["policy_command_vy"], 0.0)
+    assert math.isclose(
+        row["raw_command_yaw_rate"], row["policy_command_yaw_rate"]
+    )
 
 
 def test_summary_recomputes_trace_statistics():

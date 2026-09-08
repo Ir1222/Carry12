@@ -757,7 +757,7 @@ class LeggedRobot(BaseTask):
             (len(env_ids), 1), device=self.device).squeeze(1)
 
     def _update_carry_heading_commands(self):
-        """Convert raw commands into carry policy commands after carry-stage detection."""
+        """Keep raw policy commands and update carry-heading diagnostics."""
         self.carry_policy_commands[:, :3] = self.commands[:, :3]
         self.carry_policy_commands[:, 1] = 0.0
         self.carry_heading_error.zero_()
@@ -788,10 +788,10 @@ class LeggedRobot(BaseTask):
             self.carry_heading_ref[carry_mask] + self.commands[carry_mask, 2] * self.dt)
         self.carry_heading_error[carry_mask] = wrap_to_pi(
             self.carry_heading_ref[carry_mask] - self.yaw[carry_mask])
-        self.carry_policy_commands[carry_mask, 2] = torch.clip(
-            self.commands[carry_mask, 2] + self.cfg.commands.heading_kp * self.carry_heading_error[carry_mask],
-            -self.cfg.commands.max_yaw_rate,
-            self.cfg.commands.max_yaw_rate)
+        # velocity-tracking V2: carry_heading_ref/error are diagnostic only.
+        # The actor must observe the raw sampled yaw-rate command without
+        # heading-feedback modification.
+        self.carry_policy_commands[carry_mask, 2] = self.commands[carry_mask, 2]
 
     def _compute_torques(self, actions):
         """ Compute torques from actions.
@@ -2038,7 +2038,8 @@ class LeggedRobot(BaseTask):
         return carryup_reward
 
     def _reward_carry_velocity_task(self):
-        #内需要添加hand2object的reward，才能有效避免box掉落
+        # Legacy velocity-tracking reward retained for historical reference.
+        # Its configured scale is zero in velocity-tracking V2.
         desired_heading_dir = torch.stack((torch.cos(self.carry_heading_ref),
                                            torch.sin(self.carry_heading_ref)), dim=-1)
         desired_world_lin_vel_xy = self.carry_policy_commands[:, 0:1] * desired_heading_dir
@@ -2053,6 +2054,31 @@ class LeggedRobot(BaseTask):
                         self.cfg.rewards.carry_yaw_vel * yaw_vel_reward)
         carry_reward[~self.is_stage_carry] = 0.
         return carry_reward
+
+    def _reward_carry_lin_vel_tracking(self):
+        """Track the carry (vx, vy) command directly in the body frame."""
+        lin_vel_error = torch.sum(
+            torch.square(
+                self.carry_policy_commands[:, :2] - self.base_lin_vel[:, :2]
+            ),
+            dim=-1,
+        )
+        reward = torch.exp(
+            -lin_vel_error / self.cfg.rewards.carry_lin_vel_sigma
+        )
+        reward[~self.is_stage_carry] = 0.0
+        return reward
+
+    def _reward_carry_yaw_vel_tracking(self):
+        """Track the raw sampled yaw-rate command, including zero commands."""
+        yaw_vel_error = torch.square(
+            self.commands[:, 2] - self.base_ang_vel[:, 2]
+        )
+        reward = torch.exp(
+            -yaw_vel_error / self.cfg.rewards.carry_yaw_vel_sigma
+        )
+        reward[~self.is_stage_carry] = 0.0
+        return reward
 
     def _reward_carry_contact_task(self):
         current_hand_contact = torch.norm(

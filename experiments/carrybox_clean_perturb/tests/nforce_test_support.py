@@ -61,7 +61,8 @@ def command_env(command=(0.4, 0.0, 0.0)):
     scope = definitions("legged_gym/legged_gym/utils/math.py", ["wrap_to_pi"])
     base = definitions(
         "legged_gym/legged_gym/envs/g1/carrybox.py", ["LeggedRobot"], scope,
-        methods={"_reset_task", "_update_carry_heading_commands", "_compute_is_stage_carry"},
+        methods={"_reset_task", "_update_carry_heading_commands", "_compute_is_stage_carry",
+                 "_reward_carry_lin_vel_tracking", "_reward_carry_yaw_vel_tracking"},
     )["LeggedRobot"]
     nominal = definitions(
         "experiments/carrybox_clean_perturb/envs/carrybox_nominal_clean_env.py",

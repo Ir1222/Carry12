@@ -256,6 +256,8 @@ class G1Cfg(LeggedRobotCfg):
         carry_moving_vx_range = [0.1, 1.2]
         carry_turn_probability = 0.4
         carry_turn_yaw_range = [0.1, 0.4]
+        # Retained for config compatibility; velocity-tracking V2 does not use
+        # heading feedback to modify the actor's raw yaw-rate command.
         heading_kp = 1.0
         max_yaw_rate = 0.4
         heading_command = False
@@ -283,8 +285,10 @@ class G1Cfg(LeggedRobotCfg):
             ## task rewards
             walk_task = 1.0
             carryup_task = 1.0
-            carry_velocity_task = 1.0
-            carry_heading_hold = 0.3
+            carry_velocity_task = 0.0  # legacy coupled reward, disabled in V2
+            carry_lin_vel_tracking = 1.0
+            carry_yaw_vel_tracking = 0.75
+            carry_heading_hold = 0.0
             carry_contact_task = 0.5
 
         # walk
@@ -298,6 +302,9 @@ class G1Cfg(LeggedRobotCfg):
         box_height = 2.0
 
         # carry velocity tracking
+        carry_lin_vel_sigma = 0.25
+        carry_yaw_vel_sigma = 0.10
+        # Legacy coupled-reward coefficients retained for source compatibility.
         carry_lin_vel = 1.0
         carry_yaw_vel = 0.5
         carry_heading_sigma = 0.25
