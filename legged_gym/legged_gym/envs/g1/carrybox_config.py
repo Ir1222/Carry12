@@ -15,7 +15,8 @@ class G1Cfg(LeggedRobotCfg):
 
         env_spacing = 10. # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
-        episode_length_s = 30 # episode length in seconds
+        # episode_length_s = 30 # episode length in seconds
+        episode_length_s = 20
 
         action_curriculum = False
         test = False
@@ -182,7 +183,8 @@ class G1Cfg(LeggedRobotCfg):
             hybrid_init_prob = 0.8  # prob of random, for hybrid mode
 
             skill = ["loco", "pickUp", "carryWith"]
-            skill_init_prob = [0.6, 0.2, 0.4]
+            # skill_init_prob = [0.6, 0.2, 0.4]
+            skill_init_prob = [0.8, 0.2, 0.2]
 
             box_termination = False
             thresh_tag = [0.7, 2.0]
@@ -383,9 +385,9 @@ class G1Cfg(LeggedRobotCfg):
 class G1CfgPPO( LeggedRobotCfgPPO ):
     class algorithm( LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
-        # learning_rate = 5.e-4
-        learning_rate = 1.e-4
-        schedule = 'fixed'
+        learning_rate = 5.e-4
+        # learning_rate = 1.e-4
+        # schedule = 'fixed'
     class runner( LeggedRobotCfgPPO.runner ):
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'HIMPPO'
