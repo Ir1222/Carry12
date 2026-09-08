@@ -238,6 +238,7 @@ class LeggedRobot(BaseTask):
         self.object2start_dist_xy = torch.norm(self.object2start_pos[:, :2], dim=-1)
         self.object2start_dist_xyz = torch.norm(self.object2start_pos, dim=-1)
         self.is_stage_carry = self._compute_is_stage_carry()
+        self.carry_velocity_active = self._compute_carry_velocity_active()
         self._update_carry_heading_commands()
         
         self.tag_pos = quat_apply(self.box_states[:, 3:7].unsqueeze(1).expand(-1, 4, -1), self.tag_pos_local) + self.box_states[:, :3].unsqueeze(1)
@@ -336,6 +337,7 @@ class LeggedRobot(BaseTask):
         self.carry_heading_ref[env_ids] = 0.0
         self.carry_heading_error[env_ids] = 0.0
         self.carry_heading_initialized[env_ids] = False
+        self.carry_velocity_active[env_ids] = False
         self.carry_yaw_resample_time[env_ids] = 0.0
         self.carry_policy_commands[env_ids, :3] = self.commands[env_ids, :3]
         self.carry_policy_commands[env_ids, 1] = 0.0
@@ -1121,6 +1123,7 @@ class LeggedRobot(BaseTask):
         self.carry_heading_ref = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.carry_heading_error = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.carry_heading_initialized = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
+        self.carry_velocity_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
         self.carry_yaw_resample_time = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
@@ -1716,6 +1719,25 @@ class LeggedRobot(BaseTask):
         box_carryup_height = self.box_states[:, 2] - self._box_size[:, 2] / 2 - self.platform_pos[:, 2]
         return ((box_carryup_height > self.cfg.rewards.thresh_carryup_height) |
                 (self.object2start_dist_xy > self.cfg.rewards.thresh_carry_start_displacement))
+
+    def _compute_carry_velocity_active(self):
+        box_lifted = (
+            self.box_states[:, 2]
+            > self.cfg.rewards.target_box_height
+            - self.cfg.rewards.carry_ready_height_margin
+        )
+        hand_contact = (
+            torch.norm(
+                self.contact_forces[:, self.hand_colli_indices], dim=-1
+            )
+            > self.cfg.rewards.hand_contact_threshold
+        )
+        bilateral_contact = torch.all(hand_contact, dim=-1)
+        robot_close = (
+            self.robot2object_dist < self.cfg.rewards.thresh_robot2object
+        )
+        carry_velocity_active = box_lifted & bilateral_contact & robot_close
+        return carry_velocity_active
     
     def _draw_debug_vis(self):
         self.gym.clear_lines(self.viewer)
@@ -2066,7 +2088,7 @@ class LeggedRobot(BaseTask):
         reward = torch.exp(
             -lin_vel_error / self.cfg.rewards.carry_lin_vel_sigma
         )
-        reward[~self.is_stage_carry] = 0.0
+        reward[~self.carry_velocity_active] = 0.0
         return reward
 
     def _reward_carry_yaw_vel_tracking(self):
@@ -2077,7 +2099,7 @@ class LeggedRobot(BaseTask):
         reward = torch.exp(
             -yaw_vel_error / self.cfg.rewards.carry_yaw_vel_sigma
         )
-        reward[~self.is_stage_carry] = 0.0
+        reward[~self.carry_velocity_active] = 0.0
         return reward
 
     def _reward_carry_contact_task(self):

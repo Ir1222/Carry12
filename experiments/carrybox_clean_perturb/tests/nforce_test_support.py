@@ -62,6 +62,7 @@ def command_env(command=(0.4, 0.0, 0.0)):
     base = definitions(
         "legged_gym/legged_gym/envs/g1/carrybox.py", ["LeggedRobot"], scope,
         methods={"_reset_task", "_update_carry_heading_commands", "_compute_is_stage_carry",
+                 "_compute_carry_velocity_active",
                  "_reward_carry_lin_vel_tracking", "_reward_carry_yaw_vel_tracking"},
     )["LeggedRobot"]
     nominal = definitions(
@@ -79,6 +80,7 @@ def command_env(command=(0.4, 0.0, 0.0)):
     env.carry_heading_error = torch.zeros(1)
     env.carry_yaw_resample_time = torch.zeros(1)
     env.is_stage_carry = torch.zeros(1, dtype=torch.bool)
+    env.carry_velocity_active = torch.zeros(1, dtype=torch.bool)
     env.yaw = torch.zeros(1)
     env.tar_platform_states = torch.zeros(1, 13)
     env.tar_platform_default_states = torch.zeros(1, 13)

@@ -321,6 +321,7 @@ class G1Cfg(LeggedRobotCfg):
         thresh_carryup_height = 0.05
         thresh_carry_start_displacement = 0.5
         target_box_height = 0.72
+        carry_ready_height_margin = 0.05
 
     class normalization:
         class obs_scales:

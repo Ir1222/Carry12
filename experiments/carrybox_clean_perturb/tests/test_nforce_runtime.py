@@ -129,6 +129,7 @@ def test_carry_velocity_rewards_are_independent_body_frame_terms():
     env.base_lin_vel = torch.tensor([[0.3, -0.2, 0.0]])
     env.base_ang_vel = torch.tensor([[0.0, 0.0, 0.1]])
     env.is_stage_carry[:] = True
+    env.carry_velocity_active[:] = True
     env._update_carry_heading_commands()
 
     expected_lin = torch.exp(torch.tensor(-((0.4 - 0.3) ** 2 + 0.2 ** 2) / 0.25))
@@ -143,7 +144,7 @@ def test_carry_velocity_rewards_are_independent_body_frame_terms():
         env._reward_carry_yaw_vel_tracking(), expected_zero_yaw[None]
     )
 
-    env.is_stage_carry[:] = False
+    env.carry_velocity_active[:] = False
     torch.testing.assert_close(env._reward_carry_lin_vel_tracking(), torch.zeros(1))
     torch.testing.assert_close(env._reward_carry_yaw_vel_tracking(), torch.zeros(1))
 
@@ -158,6 +159,7 @@ def test_velocity_tracking_v2_config_and_actor_shape_are_checkpoint_compatible()
     assert cfg.rewards.scales.carry_heading_hold == 0.0
     assert cfg.rewards.carry_lin_vel_sigma == 0.25
     assert cfg.rewards.carry_yaw_vel_sigma == 0.10
+    assert cfg.rewards.carry_ready_height_margin == 0.05
     assert cfg.env.num_actor_obs == 738
     assert cfg.env.num_actions == 29
 
@@ -174,6 +176,26 @@ def test_target_carry_gate_and_evaluator_contact_confirmation():
     env.box_states[:, 2] = 0
     env.object2start_dist_xy[:] = 0.6
     assert env._compute_is_stage_carry().item()  # Or displacement alone.
+
+    env.hand_colli_indices = torch.tensor([0, 1])
+    env.contact_forces = torch.zeros(1, 2, 3)
+    env.robot2object_dist = torch.tensor([0.6])
+    env.box_states[:, 2] = 0.68
+    env.contact_forces[:, :, 0] = 2.0
+    carry_velocity_active = env._compute_carry_velocity_active()
+    assert carry_velocity_active.shape == (1,)
+    assert carry_velocity_active.dtype == torch.bool
+    assert carry_velocity_active.device == env.box_states.device
+    assert carry_velocity_active.item()
+    env.contact_forces[:, 1] = 0.0
+    assert not env._compute_carry_velocity_active().item()
+    env.contact_forces[:, 1, 0] = 2.0
+    env.box_states[:, 2] = 0.67
+    assert not env._compute_carry_velocity_active().item()
+    env.box_states[:, 2] = 0.68
+    env.robot2object_dist[:] = 0.7
+    assert not env._compute_carry_velocity_active().item()
+
     detector = RolloutEnv()
     detector.contact_forces[:] = 2.0
     for _ in range(9):
