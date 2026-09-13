@@ -16,11 +16,38 @@ python3 experiments/carrybox_clean_perturb/evaluator_NForce.py \
   --save_csv
 ```
 
-此入口始终评估 carrybox 的无外力搬运，不需要 `--task`、`--no_force` 或
-`--sweep`。保留 `--headless` 等基础运行参数；`--finetune_path` 不用于推理，
+此入口始终评估 carrybox 的无外力搬运，不需要 `--task` 或 `--no_force`。
+单点评估继续使用 `--command`；静态速度网格使用 `--command_sweep`。保留
+`--headless` 等基础运行参数；`--finetune_path` 不用于推理，
 请用 `--resume_path` 指定唯一 checkpoint。加载时要求 `model_state_dict`
 内的 actor 权重完整且形状匹配（738 维输入、29 维动作），不加载 critic、
 AMP、优化器或训练迭代状态；critic、AMP 和优化器可以不包含在 checkpoint 中。
+
+### NForce command sweep
+
+下面的命令按 `vx` 外层、`yaw_rate` 内层依次运行 35 个独立 trial：
+
+```bash
+python3 experiments/carrybox_clean_perturb/evaluator_NForce.py \
+  --resume_path legged_gym/logs/Ampstage1_UpAndWalk/Sep10_20-34-11_full_train_resume/model_33999.pt \
+  --command_sweep \
+  --vx_range 0.0,1.2,0.2 \
+  --yaw_range=-0.4,0.4,0.2 \
+  --seed 1 \
+  --steady_carry_warmup 0.20 \
+  --steady_duration 3.0 \
+  --save_csv
+```
+
+`--vx_range` 和 `--yaw_range` 的格式均为 `MIN,MAX,STEP`，包含两个端点；
+`STEP` 必须为正数并能整除区间长度。仅写 `--command_sweep` 时默认使用上述
+`vx=[0.0,1.2]`、`yaw_rate=[-0.4,0.4]`、两轴步长均为 `0.2` 的网格，`vy`
+固定为 `0.0`。`--command` 与 `--command_sweep` 互斥，range 参数不能用于
+单点模式。
+
+checkpoint 和 Isaac Gym 环境只加载一次，但每个 command 都重新设置相同 seed、
+独立 reset 并清空 actor history。物理失败会记录当前 trial 后继续下一个网格点；
+配置断言或程序异常会中止 sweep。
 
 ### 评估流程和分支适配
 
@@ -56,8 +83,10 @@ experiments/carrybox_clean_perturb/results/<checkpoint父目录>_<checkpoint文�
 ```
 
 保留 main 的表头与字段顺序；旧 summary 表头不匹配时拒绝追加。
-每次运行追加一行 summary，但同目录的 `traces/T0001.csv` 会覆盖。
-比较多个 seed 或命令时，使用不同的 `--output_dir` 保存各次 trace。
+单点运行追加一行 summary；默认 sweep 追加 `T0001` 至 `T0035` 共 35 行，
+自定义网格则写入 `T0001` 至 `T<网格大小>`，并生成同名 trace。重复使用同一
+目录时 summary 继续追加，同名 trace 会覆盖，因此正式评估应使用不同的
+`--output_dir` 保存每次完整结果。
 不加 `--save_csv` 时只输出终端结果。
 
 ### 离线验证与限制

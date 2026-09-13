@@ -154,7 +154,7 @@ class RolloutEnv(_NForceCore):
 
     def reset(self):
         self.step_id = 0
-        self.commands[:, :3] = torch.tensor(self.command)
+        self.commands[:, :3] = torch.tensor(self.cfg.nominal_clean.command)
         self.carry_policy_commands[:] = self.commands[:, :3]
         self.carry_policy_commands[:, 1] = 0.0
         self.obs[:, -3:] = self.carry_policy_commands

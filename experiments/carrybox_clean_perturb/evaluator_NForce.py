@@ -4,8 +4,6 @@ Velocity statistics are collected once per policy step, only after the existing
 confirmed-carry gate has remained true for the requested additional warmup.
 """
 
-import argparse
-import math
 import os
 import sys
 
@@ -24,7 +22,6 @@ for path in (
 import isaacgym  # noqa: F401,E402
 import torch  # noqa: E402
 
-from configs.evaluation_config import FIXED_COMMAND  # noqa: E402
 from configs.nominal_clean_config import apply_nominal_clean_config  # noqa: E402
 from envs.carrybox_nominal_clean_env import (  # noqa: E402
     LeggedRobot as NominalCleanCarryBoxEnv,
@@ -32,7 +29,8 @@ from envs.carrybox_nominal_clean_env import (  # noqa: E402
 from evaluation.inference import (  # noqa: E402
     load_actor_only_for_inference,
 )
-from evaluation.nforce_trial import run_trial  # noqa: E402
+from evaluation.nforce_cli import parse_nforce_args  # noqa: E402
+from evaluation.nforce_trial import run_trials  # noqa: E402
 from evaluation.nforce_velocity import (  # noqa: E402
     NForceVelocityCsvLogger,
 )
@@ -42,8 +40,6 @@ from legged_gym.utils.helpers import set_seed  # noqa: E402
 
 
 NFORCE_TASK = "carrybox_nforce_velocity_eval"
-DEFAULT_STEADY_CARRY_WARMUP_S = 0.20
-DEFAULT_STEADY_DURATION_S = 5.0
 DEFAULT_EPISODE_LENGTH_S = 30.0
 
 
@@ -61,52 +57,8 @@ class NForceCarryBoxEnv(NominalCleanCarryBoxEnv):
         super()._snapshot_clean_eval_for_summary(env_id)
 
 
-def _parse_command(text):
-    parts = [part.strip() for part in str(text).split(",")]
-    if len(parts) != 3 or any(not part for part in parts):
-        raise argparse.ArgumentTypeError(
-            "--command must contain exactly three values: VX,VY,YAW_RATE"
-        )
-    try:
-        command = tuple(float(part) for part in parts)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "--command must contain exactly three floating-point values"
-        ) from exc
-    if not all(math.isfinite(value) for value in command):
-        raise argparse.ArgumentTypeError("--command values must be finite")
-    return command
-
-
 def parse_evaluator_args():
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument(
-        "--command",
-        type=_parse_command,
-        default=FIXED_COMMAND,
-        metavar="VX,VY,YAW_RATE",
-    )
-    parser.add_argument(
-        "--steady_carry_warmup",
-        type=float,
-        default=DEFAULT_STEADY_CARRY_WARMUP_S,
-    )
-    parser.add_argument(
-        "--steady_duration",
-        type=float,
-        default=DEFAULT_STEADY_DURATION_S,
-    )
-    parser.add_argument("--save_csv", action="store_true", default=False)
-    parser.add_argument("--output_dir", type=str, default=None)
-    eval_args, remaining = parser.parse_known_args()
-    if not math.isfinite(eval_args.steady_carry_warmup):
-        parser.error("--steady_carry_warmup must be finite")
-    if eval_args.steady_carry_warmup < 0.0:
-        parser.error("--steady_carry_warmup must be non-negative")
-    if not math.isfinite(eval_args.steady_duration):
-        parser.error("--steady_duration must be finite")
-    if eval_args.steady_duration <= 0.0:
-        parser.error("--steady_duration must be positive")
+    eval_args, remaining = parse_nforce_args()
     sys.argv = [sys.argv[0], *remaining]
     return eval_args
 
@@ -136,7 +88,9 @@ def play(eval_args, legged_args):
     if getattr(legged_args, "finetune_path", None) is not None:
         raise ValueError("NForce inference uses --resume_path; --finetune_path is not supported.")
 
-    command = tuple(float(value) for value in eval_args.command)
+    commands = tuple(
+        tuple(float(value) for value in command) for command in eval_args.commands
+    )
     seed = 1 if legged_args.seed is None else int(legged_args.seed)
     episode_length_s = max(
         DEFAULT_EPISODE_LENGTH_S,
@@ -148,7 +102,7 @@ def play(eval_args, legged_args):
     env_cfg = apply_nominal_clean_config(
         env_cfg,
         trace_enabled=False,
-        command=command,
+        command=commands[0],
         episode_length_s=episode_length_s,
     )
     env_cfg.clean_perturbation.enabled = False
@@ -174,6 +128,14 @@ def play(eval_args, legged_args):
     print("[CONFIG] domain_rand.disturbance=False")
     print("[CONFIG] domain_rand.push_robots=False")
     print("[CONFIG] evaluator physics-substep force trace disabled")
+    if eval_args.command_sweep:
+        print(
+            "[CONFIG] NForce command sweep "
+            f"conditions={len(commands)} vx_range={eval_args.vx_range} "
+            f"yaw_range={eval_args.yaw_range}"
+        )
+    else:
+        print(f"[CONFIG] NForce fixed command={commands[0]}")
 
     ppo_runner, _ = task_registry.make_alg_runner(
         env=env,
@@ -189,23 +151,32 @@ def play(eval_args, legged_args):
     )
     policy = ppo_runner.get_inference_policy(device=env.device)
 
-    samples, summary = run_trial(
+    logger = None
+    if eval_args.save_csv:
+        output_dir = eval_args.output_dir or _default_output_dir(checkpoint)
+        logger = NForceVelocityCsvLogger(output_dir)
+
+    summaries = run_trials(
         env,
         policy,
         checkpoint=checkpoint,
         seed=seed,
-        command=command,
+        commands=commands,
         eval_args=eval_args,
         seed_fn=set_seed,
+        logger=logger,
     )
-    if eval_args.save_csv:
-        output_dir = eval_args.output_dir or _default_output_dir(checkpoint)
-        logger = NForceVelocityCsvLogger(output_dir)
-        trace_path = logger.write_trace("T0001", samples)
-        logger.append_summary(summary)
+    if logger is not None:
         print(f"[OUTPUT] summary={logger.summary_path}")
-        print(f"[OUTPUT] trace={trace_path}")
-    return summary
+        print(f"[OUTPUT] traces={logger.trace_dir}")
+    if eval_args.command_sweep:
+        completed = sum(
+            summary["termination_reason"] == "steady_carry_complete"
+            for summary in summaries
+        )
+        print(f"[SWEEP] finished={len(summaries)} complete={completed}")
+        return summaries
+    return summaries[0]
 
 
 if __name__ == "__main__":

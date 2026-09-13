@@ -25,6 +25,7 @@ def _yaw_scalar(env):
 
 def _reset_for_trial(env, seed, command, seed_fn):
     seed_fn(int(seed))
+    env.cfg.nominal_clean.command = tuple(float(value) for value in command)
     env.reset_evaluation_trial_state(clear_actor_history=True)
     env.nforce_terminal_base_yaw_rad[:] = float("nan")
     # NominalCleanCarryBoxEnv restores the fixed raw command in _reset_task.
@@ -97,9 +98,9 @@ def _latched_failure_reason(env):
     return ""
 
 
-def _print_trial_header(checkpoint, seed, command):
+def _print_trial_header(trial_id, checkpoint, seed, command):
     print("=" * 60)
-    print("[NFORCE] Trial T0001")
+    print(f"[NFORCE] Trial {trial_id}")
     print(f"checkpoint={checkpoint}")
     print(f"seed={seed}")
     print(
@@ -109,8 +110,18 @@ def _print_trial_header(checkpoint, seed, command):
     print("=" * 60)
 
 
-def run_trial(env, policy, checkpoint, seed, command, eval_args, *, seed_fn):
-    _print_trial_header(checkpoint, seed, command)
+def run_trial(
+    env,
+    policy,
+    checkpoint,
+    seed,
+    command,
+    eval_args,
+    *,
+    seed_fn,
+    trial_id="T0001",
+):
+    _print_trial_header(trial_id, checkpoint, seed, command)
     obs = _reset_for_trial(env, seed, command, seed_fn)
     assert_startup_compatibility(
         env, obs, expected_command=env.carry_policy_commands[0, :3].tolist()
@@ -217,7 +228,7 @@ def run_trial(env, policy, checkpoint, seed, command, eval_args, *, seed_fn):
 
     _assert_no_force_state(env)
     summary = summarize_velocity_tracking(
-        trial_id="T0001",
+        trial_id=trial_id,
         checkpoint=checkpoint,
         seed=seed,
         raw_command=command,
@@ -262,5 +273,37 @@ def run_trial(env, policy, checkpoint, seed, command, eval_args, *, seed_fn):
     ):
         print(f"{key}={summary[key]}")
     return samples, summary
+
+
+def run_trials(
+    env,
+    policy,
+    checkpoint,
+    seed,
+    commands,
+    eval_args,
+    *,
+    seed_fn,
+    logger=None,
+):
+    """Run independent command trials while reusing one environment and policy."""
+    summaries = []
+    for index, command in enumerate(commands, start=1):
+        trial_id = f"T{index:04d}"
+        samples, summary = run_trial(
+            env,
+            policy,
+            checkpoint,
+            seed,
+            command,
+            eval_args,
+            seed_fn=seed_fn,
+            trial_id=trial_id,
+        )
+        if logger is not None:
+            logger.write_trace(trial_id, samples)
+            logger.append_summary(summary)
+        summaries.append(summary)
+    return summaries
 
 

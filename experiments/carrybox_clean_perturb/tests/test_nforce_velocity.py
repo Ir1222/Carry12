@@ -153,6 +153,26 @@ def test_nforce_csv_roundtrip_recomputes_summary_and_appends():
             assert math.isclose(float(summaries[0][key]), recomputed[key])
 
 
+def test_nforce_sweep_csv_writes_35_summaries_and_unique_traces():
+    with tempfile.TemporaryDirectory() as directory:
+        logger = NForceVelocityCsvLogger(directory)
+        for index in range(1, 36):
+            trial_id = f"T{index:04d}"
+            summary = _summary([])
+            summary["trial_id"] = trial_id
+            logger.write_trace(trial_id, [])
+            logger.append_summary(summary)
+
+        with open(logger.summary_path, newline="") as file:
+            summaries = list(csv.DictReader(file))
+        trace_names = sorted(path.name for path in Path(logger.trace_dir).glob("*.csv"))
+        assert len(summaries) == 35
+        assert [row["trial_id"] for row in summaries] == [
+            f"T{index:04d}" for index in range(1, 36)
+        ]
+        assert trace_names == [f"T{index:04d}.csv" for index in range(1, 36)]
+
+
 def test_nforce_csv_rejects_existing_different_header():
     with tempfile.TemporaryDirectory() as directory:
         logger = NForceVelocityCsvLogger(directory)
