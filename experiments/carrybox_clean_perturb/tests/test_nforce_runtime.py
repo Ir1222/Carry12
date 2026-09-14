@@ -123,33 +123,35 @@ def test_target_reset_and_heading_keep_raw_commands_without_resampling():
         assert env.carry_policy_commands[0, 1].item() == 0.0
 
 
-def test_carry_velocity_rewards_are_independent_body_frame_terms():
+def test_carry_velocity_v3_rewards_use_tracking_frames_and_persistent_gate():
     env = command_env((0.4, 0.0, 0.2))
     env._reset_task(torch.tensor([0]))
-    env.base_lin_vel = torch.tensor([[0.3, -0.2, 0.0]])
-    env.base_ang_vel = torch.tensor([[0.0, 0.0, 0.1]])
+    env.base_lin_vel = torch.tensor([[9.0, 9.0, 9.0]])
+    env.base_ang_vel = torch.tensor([[9.0, 9.0, 9.0]])
+    env.base_lin_vel_yaw = torch.tensor([[0.3, -0.2, 0.0]])
+    env.base_yaw_rate_world = torch.tensor([0.1])
     env.is_stage_carry[:] = True
-    env.carry_velocity_active[:] = True
+    env.carry_velocity_active[:] = False
+    env.carry_tracking_started[:] = True
     env._update_carry_heading_commands()
 
     expected_lin = torch.exp(torch.tensor(-((0.4 - 0.3) ** 2 + 0.2 ** 2) / 0.25))
-    expected_yaw = torch.exp(torch.tensor(-((0.2 - 0.1) ** 2) / 0.10))
+    expected_yaw = torch.exp(torch.tensor(-((0.2 - 0.1) ** 2) / 0.25))
     torch.testing.assert_close(env._reward_carry_lin_vel_tracking(), expected_lin[None])
     torch.testing.assert_close(env._reward_carry_yaw_vel_tracking(), expected_yaw[None])
 
-    # Zero yaw remains an active target rather than being masked as "not turning".
+    # Reward follows the actor-visible command source, not the raw command buffer.
     env.commands[:, 2] = 0.0
-    expected_zero_yaw = torch.exp(torch.tensor(-(0.0 - 0.1) ** 2 / 0.10))
     torch.testing.assert_close(
-        env._reward_carry_yaw_vel_tracking(), expected_zero_yaw[None]
+        env._reward_carry_yaw_vel_tracking(), expected_yaw[None]
     )
 
-    env.carry_velocity_active[:] = False
+    env.carry_tracking_started[:] = False
     torch.testing.assert_close(env._reward_carry_lin_vel_tracking(), torch.zeros(1))
     torch.testing.assert_close(env._reward_carry_yaw_vel_tracking(), torch.zeros(1))
 
 
-def test_velocity_tracking_v2_config_and_actor_shape_are_checkpoint_compatible():
+def test_velocity_tracking_v3_config_and_actor_shape_are_checkpoint_compatible():
     from nforce_test_support import carrybox_configs
 
     cfg, _ = carrybox_configs()
@@ -158,7 +160,7 @@ def test_velocity_tracking_v2_config_and_actor_shape_are_checkpoint_compatible()
     assert cfg.rewards.scales.carry_yaw_vel_tracking == 0.75
     assert cfg.rewards.scales.carry_heading_hold == 0.0
     assert cfg.rewards.carry_lin_vel_sigma == 0.25
-    assert cfg.rewards.carry_yaw_vel_sigma == 0.10
+    assert cfg.rewards.carry_yaw_vel_sigma == 0.25
     assert cfg.rewards.carry_ready_height_margin == 0.05
     assert cfg.env.num_actor_obs == 738
     assert cfg.env.num_actions == 29

@@ -305,7 +305,7 @@ class G1Cfg(LeggedRobotCfg):
 
         # carry velocity tracking
         carry_lin_vel_sigma = 0.25
-        carry_yaw_vel_sigma = 0.10
+        carry_yaw_vel_sigma = 0.25
         # Legacy coupled-reward coefficients retained for source compatibility.
         carry_lin_vel = 1.0
         carry_yaw_vel = 0.5

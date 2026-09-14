@@ -44,7 +44,7 @@ from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.utils.terrain import Terrain
 from legged_gym.utils.math import wrap_to_pi
 from legged_gym.utils.helpers import class_to_dict
-from legged_gym.utils.torch_utils import calc_heading_quat_inv, quat_to_tan_norm, euler_from_quaternion
+from legged_gym.utils.torch_utils import calc_heading_quat, calc_heading_quat_inv, quat_to_tan_norm, euler_from_quaternion
 
 from legged_gym.envs.base.base_task import BaseTask
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg
@@ -203,8 +203,13 @@ class LeggedRobot(BaseTask):
         self.base_quat[:] = self.root_states[:, 3:7]
         self.roll, self.pitch, self.yaw = euler_from_quaternion(self.base_quat)
         
-        self.base_lin_vel = quat_rotate_inverse(self.rigid_body_states[:, self.upper_body_index,3:7], self.rigid_body_states[:, self.upper_body_index,7:10])
-        self.base_ang_vel = quat_rotate_inverse(self.rigid_body_states[:, self.upper_body_index,3:7], self.rigid_body_states[:, self.upper_body_index,10:13])
+        upper_body_quat = self.rigid_body_states[:, self.upper_body_index, 3:7]
+        upper_body_lin_vel_world = self.rigid_body_states[:, self.upper_body_index, 7:10]
+        upper_body_ang_vel_world = self.rigid_body_states[:, self.upper_body_index, 10:13]
+        self.base_lin_vel = quat_rotate_inverse(upper_body_quat, upper_body_lin_vel_world)
+        self.base_ang_vel = quat_rotate_inverse(upper_body_quat, upper_body_ang_vel_world)
+        self.base_lin_vel_yaw = quat_rotate_inverse(calc_heading_quat(upper_body_quat), upper_body_lin_vel_world)
+        self.base_yaw_rate_world = upper_body_ang_vel_world[:, 2]
         
         self.end_effector_pos = torch.concatenate((self.rigid_body_states[:, self.hand_pos_indices[0], :3],
                                                   self.rigid_body_states[:, self.hand_pos_indices[1], :3],
@@ -239,6 +244,7 @@ class LeggedRobot(BaseTask):
         self.object2start_dist_xyz = torch.norm(self.object2start_pos, dim=-1)
         self.is_stage_carry = self._compute_is_stage_carry()
         self.carry_velocity_active = self._compute_carry_velocity_active()
+        self.carry_tracking_started |= self.carry_velocity_active
         self._update_carry_heading_commands()
         
         self.tag_pos = quat_apply(self.box_states[:, 3:7].unsqueeze(1).expand(-1, 4, -1), self.tag_pos_local) + self.box_states[:, :3].unsqueeze(1)
@@ -338,6 +344,7 @@ class LeggedRobot(BaseTask):
         self.carry_heading_error[env_ids] = 0.0
         self.carry_heading_initialized[env_ids] = False
         self.carry_velocity_active[env_ids] = False
+        self.carry_tracking_started[env_ids] = False
         self.carry_yaw_resample_time[env_ids] = 0.0
         self.carry_policy_commands[env_ids, :3] = self.commands[env_ids, :3]
         self.carry_policy_commands[env_ids, 1] = 0.0
@@ -1124,6 +1131,7 @@ class LeggedRobot(BaseTask):
         self.carry_heading_error = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.carry_heading_initialized = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
         self.carry_velocity_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
+        self.carry_tracking_started = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
         self.carry_yaw_resample_time = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
@@ -1132,8 +1140,13 @@ class LeggedRobot(BaseTask):
         self.hand_contact_filt = torch.zeros_like(self.last_hand_contacts)
         self.can_see_tag = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
         self.has_seen_tag = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
-        self.base_lin_vel = quat_rotate_inverse(self.rigid_body_states[:, self.upper_body_index,3:7], self.rigid_body_states[:, self.upper_body_index,7:10])
-        self.base_ang_vel = quat_rotate_inverse(self.rigid_body_states[:, self.upper_body_index,3:7], self.rigid_body_states[:, self.upper_body_index,10:13])
+        upper_body_quat = self.rigid_body_states[:, self.upper_body_index, 3:7]
+        upper_body_lin_vel_world = self.rigid_body_states[:, self.upper_body_index, 7:10]
+        upper_body_ang_vel_world = self.rigid_body_states[:, self.upper_body_index, 10:13]
+        self.base_lin_vel = quat_rotate_inverse(upper_body_quat, upper_body_lin_vel_world)
+        self.base_ang_vel = quat_rotate_inverse(upper_body_quat, upper_body_ang_vel_world)
+        self.base_lin_vel_yaw = quat_rotate_inverse(calc_heading_quat(upper_body_quat), upper_body_lin_vel_world)
+        self.base_yaw_rate_world = upper_body_ang_vel_world[:, 2]
         self.projected_gravity = quat_rotate_inverse(self.rigid_body_states[:, self.upper_body_index,3:7], self.gravity_vec)
         self.projected_gravity_box = quat_rotate_inverse(self.box_states[:, 3:7], self.gravity_vec)
         self.delay_buffer = torch.zeros(self.cfg.domain_rand.max_delay_timesteps, self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
@@ -2059,47 +2072,47 @@ class LeggedRobot(BaseTask):
         carryup_reward[self.robot2object_dist > self.cfg.rewards.thresh_robot2object] = 0.
         return carryup_reward
 
-    def _reward_carry_velocity_task(self):
-        # Legacy velocity-tracking reward retained for historical reference.
-        # Its configured scale is zero in velocity-tracking V2.
-        desired_heading_dir = torch.stack((torch.cos(self.carry_heading_ref),
-                                           torch.sin(self.carry_heading_ref)), dim=-1)
-        desired_world_lin_vel_xy = self.carry_policy_commands[:, 0:1] * desired_heading_dir
-        actual_world_lin_vel_xy = self.rigid_body_states[:, self.upper_body_index, 7:9]
-        lin_vel_error = torch.sum(torch.square(desired_world_lin_vel_xy - actual_world_lin_vel_xy), dim=1)
-        lin_vel_reward = torch.exp(-lin_vel_error / self.cfg.rewards.tracking_sigma)
+    # def _reward_carry_velocity_task(self):
+    #     # Legacy velocity-tracking reward retained for historical reference.
+    #     # Its configured scale is zero in velocity-tracking V2.
+    #     desired_heading_dir = torch.stack((torch.cos(self.carry_heading_ref),
+    #                                        torch.sin(self.carry_heading_ref)), dim=-1)
+    #     desired_world_lin_vel_xy = self.carry_policy_commands[:, 0:1] * desired_heading_dir
+    #     actual_world_lin_vel_xy = self.rigid_body_states[:, self.upper_body_index, 7:9]
+    #     lin_vel_error = torch.sum(torch.square(desired_world_lin_vel_xy - actual_world_lin_vel_xy), dim=1)
+    #     lin_vel_reward = torch.exp(-lin_vel_error / self.cfg.rewards.tracking_sigma)
 
-        yaw_vel_error = torch.square(self.carry_policy_commands[:, 2] - self.base_ang_vel[:, 2])
-        yaw_vel_reward = torch.exp(-yaw_vel_error / self.cfg.rewards.tracking_sigma)
+    #     yaw_vel_error = torch.square(self.carry_policy_commands[:, 2] - self.base_ang_vel[:, 2])
+    #     yaw_vel_reward = torch.exp(-yaw_vel_error / self.cfg.rewards.tracking_sigma)
 
-        carry_reward = (self.cfg.rewards.carry_lin_vel * lin_vel_reward +
-                        self.cfg.rewards.carry_yaw_vel * yaw_vel_reward)
-        carry_reward[~self.is_stage_carry] = 0.
-        return carry_reward
+    #     carry_reward = (self.cfg.rewards.carry_lin_vel * lin_vel_reward +
+    #                     self.cfg.rewards.carry_yaw_vel * yaw_vel_reward)
+    #     carry_reward[~self.is_stage_carry] = 0.
+    #     return carry_reward
 
     def _reward_carry_lin_vel_tracking(self):
-        """Track the carry (vx, vy) command directly in the body frame."""
+        """Track the carry (vx, vy) command in the pelvis yaw frame."""
         lin_vel_error = torch.sum(
             torch.square(
-                self.carry_policy_commands[:, :2] - self.base_lin_vel[:, :2]
+                self.carry_policy_commands[:, :2] - self.base_lin_vel_yaw[:, :2]
             ),
             dim=-1,
         )
         reward = torch.exp(
             -lin_vel_error / self.cfg.rewards.carry_lin_vel_sigma
         )
-        reward[~self.carry_velocity_active] = 0.0
+        reward[~self.carry_tracking_started] = 0.0
         return reward
 
     def _reward_carry_yaw_vel_tracking(self):
-        """Track the raw sampled yaw-rate command, including zero commands."""
+        """Track the policy yaw-rate command against pelvis world-z angular velocity."""
         yaw_vel_error = torch.square(
-            self.commands[:, 2] - self.base_ang_vel[:, 2]
+            self.carry_policy_commands[:, 2] - self.base_yaw_rate_world
         )
         reward = torch.exp(
             -yaw_vel_error / self.cfg.rewards.carry_yaw_vel_sigma
         )
-        reward[~self.carry_velocity_active] = 0.0
+        reward[~self.carry_tracking_started] = 0.0
         return reward
 
     def _reward_carry_contact_task(self):
@@ -2129,20 +2142,20 @@ class LeggedRobot(BaseTask):
         carry_contact_reward[~self.is_stage_carry] = 0.0
         return carry_contact_reward
 
-    def _reward_carry_heading_hold(self):
-        heading_alignment = torch.exp(
-            -torch.square(self.carry_heading_error) / self.cfg.rewards.carry_heading_sigma)
+    # def _reward_carry_heading_hold(self):
+    #     heading_alignment = torch.exp(
+    #         -torch.square(self.carry_heading_error) / self.cfg.rewards.carry_heading_sigma)
 
-        abs_heading_error = torch.abs(self.carry_heading_error)
-        heading_huber_delta = self.cfg.rewards.carry_heading_huber_delta
-        heading_huber_error = torch.where(
-            abs_heading_error <= heading_huber_delta,
-            0.5 * torch.square(self.carry_heading_error) / heading_huber_delta,
-            abs_heading_error - 0.5 * heading_huber_delta)
-        heading_huber_max = torch.pi - 0.5 * heading_huber_delta
-        heading_huber_error_normalized = heading_huber_error / heading_huber_max
+    #     abs_heading_error = torch.abs(self.carry_heading_error)
+    #     heading_huber_delta = self.cfg.rewards.carry_heading_huber_delta
+    #     heading_huber_error = torch.where(
+    #         abs_heading_error <= heading_huber_delta,
+    #         0.5 * torch.square(self.carry_heading_error) / heading_huber_delta,
+    #         abs_heading_error - 0.5 * heading_huber_delta)
+    #     heading_huber_max = torch.pi - 0.5 * heading_huber_delta
+    #     heading_huber_error_normalized = heading_huber_error / heading_huber_max
 
-        heading_reward = (heading_alignment - self.cfg.rewards.carry_heading_huber_weight
-                           * heading_huber_error_normalized)
-        heading_reward[~self.is_stage_carry] = 0.
-        return heading_reward
+    #     heading_reward = (heading_alignment - self.cfg.rewards.carry_heading_huber_weight
+    #                        * heading_huber_error_normalized)
+    #     heading_reward[~self.is_stage_carry] = 0.
+    #     return heading_reward
