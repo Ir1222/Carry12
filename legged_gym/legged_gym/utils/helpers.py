@@ -198,6 +198,7 @@ def get_args():
         {"name": "--resume", "action": "store_true", "default": False,  "help": "Resume training from a checkpoint"},
         {"name": "--resume_path", "type": str,  "help": "Path to the directory where the run to be resumed is located."},
         {"name": "--finetune_path", "type": str, "help": "Checkpoint used to initialize a new finetune run without restoring optimizer or iteration state."},
+        {"name": "--init_policy_path", "type": str, "help": "Checkpoint used to initialize only the Actor and action std for a new non-AMP carry-locomotion run. Does not restore critic, optimizer, AMP, or iteration state."},
         {"name": "--experiment_name", "type": str,  "help": "Name of the experiment to run or load. Overrides config file if provided."},
         {"name": "--run_name", "type": str,  "help": "Name of the run. Overrides config file if provided."},
         {"name": "--load_run", "type": str,  "help": "Name of the run to load when resume=True. If -1: will load the last run. Overrides config file if provided."},
