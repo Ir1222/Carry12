@@ -37,6 +37,10 @@ from .g1.carrybox import LeggedRobot as G1CarryBox
 from .g1.carrybox_config import G1Cfg as G1CarryBoxCfg
 from .g1.carrybox_config import G1CfgPPO as G1CarryBoxCfgPPO
 
+from .g1.carrybox_locomotion import LeggedRobot as G1CarryBoxLocomotion
+from .g1.carrybox_locomotion_config import G1Cfg as G1CarryBoxLocomotionCfg
+from .g1.carrybox_locomotion_config import G1CfgPPO as G1CarryBoxLocomotionCfgPPO
+
 from .g1.carrybox_resume_config import G1Cfg as G1CarryBoxResumeCfg
 from .g1.carrybox_resume_config import G1CfgPPO as G1CarryBoxResumeCfgPPO
 
@@ -49,6 +53,12 @@ from .g1.carrybox_config_pi_only import G1Cfg as G1CarryBoxPIOnlyCfg
 from .g1.carrybox_config_pi_only import G1CfgPPO as G1CarryBoxPIOnlyCfgPPO
 
 task_registry.register( "carrybox", G1CarryBox, G1CarryBoxCfg(), G1CarryBoxCfgPPO() )
+task_registry.register(
+    "carrybox_locomotion",
+    G1CarryBoxLocomotion,
+    G1CarryBoxLocomotionCfg(),
+    G1CarryBoxLocomotionCfgPPO(),
+)
 task_registry.register( "carrybox_resume", G1CarryBox, G1CarryBoxResumeCfg(), G1CarryBoxResumeCfgPPO() )
 task_registry.register( "carrybox_perturb", G1CarryBoxPerturb, G1CarryBoxPerturbCfg(), G1CarryBoxPerturbCfgPPO() )
 task_registry.register( "carrybox_pi_only", G1CarryBoxPIOnly, G1CarryBoxPIOnlyCfg(), G1CarryBoxPIOnlyCfgPPO() )

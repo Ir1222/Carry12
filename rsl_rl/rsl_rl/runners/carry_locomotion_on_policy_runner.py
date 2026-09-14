@@ -197,6 +197,7 @@ class CarryLocomotionOnPolicyRunner:
             learn_time = stop - start
             if self.log_dir is not None:
                 self.log(locals())
+            self.current_learning_iteration = it
             if it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, f"model_{it}.pt"))
             ep_infos.clear()
@@ -207,7 +208,6 @@ class CarryLocomotionOnPolicyRunner:
                 if self.logger_type == "wandb" and git_file_paths:
                     for path in git_file_paths:
                         self.writer.save_file(path)
-            self.current_learning_iteration = it
 
         self.save(
             os.path.join(
@@ -441,6 +441,7 @@ class CarryLocomotionOnPolicyRunner:
             checkpoint["model_state_dict"], strict=True
         )
         self.alg.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        self.alg.learning_rate = self.alg.optimizer.param_groups[0]["lr"]
         self.current_learning_iteration = checkpoint["iter"]
         return checkpoint.get("infos")
 
