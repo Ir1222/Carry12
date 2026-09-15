@@ -48,13 +48,13 @@ class G1Cfg(CarryBoxCfg):
 
     class rewards(CarryBoxCfg.rewards):
         class scales:
-            carry_lin_vel_tracking = 2.0
-            carry_yaw_vel_tracking = 1.0
+            carry_lin_vel_tracking = 3.0 #2.0
+            carry_yaw_vel_tracking = 2.5 #1.0
 
-            carry_bilateral_contact = 1.5
+            carry_bilateral_contact = 0 #1.5
             carry_hand_box_surface = 1.0
-            carry_relative_velocity = 0.5
-            carry_relative_position = 0.5
+            carry_relative_velocity = 0 #0.5
+            carry_relative_position = 0 #0.5
             zero_command_stillness = 0.2
 
             lin_vel_z = -1.0
@@ -80,7 +80,7 @@ class G1Cfg(CarryBoxCfg):
             walk_task = 0.0
             carryup_task = 0.0
             carry_velocity_task = 0.0
-            carry_contact_task = 0.0
+            carry_contact_task = 0.5
             feet_clearance = 0.0
             no_fly = 0.0
             base_height = 0.0
