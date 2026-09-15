@@ -122,6 +122,12 @@ class CarryLocomotionOnPolicyRunner:
         start_iter = self.current_learning_iteration
         tot_iter = start_iter + num_learning_iterations
         for it in range(start_iter, tot_iter):
+            tracking_sq_error_sum = torch.zeros(
+                3, dtype=torch.float, device=self.device
+            )
+            tracking_valid_count = torch.zeros(
+                (), dtype=torch.float, device=self.device
+            )
             start = time.time()
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
@@ -150,6 +156,22 @@ class CarryLocomotionOnPolicyRunner:
                     termination_privileged_obs = (
                         termination_privileged_obs.to(self.device)
                     )
+
+                    command = self.env.carry_policy_commands[:, :3]
+                    actual = torch.stack(
+                        (
+                            self.env.base_lin_vel_yaw[:, 0],
+                            self.env.base_lin_vel_yaw[:, 1],
+                            self.env.base_yaw_rate_world,
+                        ),
+                        dim=-1,
+                    )
+                    squared_error = (command - actual) ** 2
+                    valid_mask = ~(dones.reshape(-1) > 0)
+                    tracking_sq_error_sum += squared_error[valid_mask].sum(
+                        dim=0
+                    )
+                    tracking_valid_count += valid_mask.sum()
 
                     next_critic_obs = critic_obs.clone().detach()
                     next_critic_obs[termination_ids] = (
@@ -180,6 +202,15 @@ class CarryLocomotionOnPolicyRunner:
                         )
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
+
+                safe_tracking_count = tracking_valid_count.clamp_min(1.0)
+                tracking_rmse = torch.where(
+                    tracking_valid_count > 0,
+                    torch.sqrt(
+                        tracking_sq_error_sum / safe_tracking_count
+                    ),
+                    torch.zeros_like(tracking_sq_error_sum),
+                )
 
                 stop = time.time()
                 collection_time = stop - start
@@ -270,6 +301,17 @@ class CarryLocomotionOnPolicyRunner:
         self.writer.add_scalar(
             "Policy/mean_noise_std", mean_std.item(), locs["it"]
         )
+        self.writer.add_scalar(
+            "TrackingRMSE/vx", locs["tracking_rmse"][0], locs["it"]
+        )
+        self.writer.add_scalar(
+            "TrackingRMSE/vy", locs["tracking_rmse"][1], locs["it"]
+        )
+        self.writer.add_scalar(
+            "TrackingRMSE/yaw_rate",
+            locs["tracking_rmse"][2],
+            locs["it"],
+        )
         self.writer.add_scalar("Perf/total_fps", fps, locs["it"])
         self.writer.add_scalar(
             "Perf/collection time", locs["collection_time"], locs["it"]
@@ -319,6 +361,10 @@ class CarryLocomotionOnPolicyRunner:
             f"{'Value smoothness loss:':>{pad}} "
             f"{locs['mean_value_smooth_loss']:.4f}\n"
             f"{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"
+            f"{'Tracking RMSE [vx, vy, yaw]:':>{pad}} "
+            f"{locs['tracking_rmse'][0]:.4f}, "
+            f"{locs['tracking_rmse'][1]:.4f}, "
+            f"{locs['tracking_rmse'][2]:.4f}\n"
         )
         if len(locs["rewbuffer"]) > 0:
             log_string += (
