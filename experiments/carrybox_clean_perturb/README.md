@@ -7,14 +7,9 @@
 将 `--resume_path` 换成该分支训练的 `task=carrybox` checkpoint 即可运行：
 
 ```bash
-python3 experiments/carrybox_clean_perturb/evaluator_NForce.py \
-  --resume_path /path/to/velocity-tracking/carrybox/model_XXXXX.pt \
-  --command 0.4,0.0,0.0 \
-  --seed 1 \
-  --steady_carry_warmup 0.20 \
-  --steady_duration 5.0 \
-  --save_csv
+python3 experiments/carrybox_clean_perturb/evaluator_NForce.py --resume_path logs/carrybox_locomotion/Sep15_13-39-45_loaded_velocity_tracking_v1 --command 0.4,0.0,0.0 --seed 1 --steady_carry_warmup 0.20 --steady_duration 5.0 --save_csv
 ```
+logs/carrybox_locomotion/Sep15_13-39-45_loaded_velocity_tracking_v1
 
 此入口始终评估 carrybox 的无外力搬运，不需要 `--task` 或 `--no_force`。
 单点评估继续使用 `--command`；静态速度网格使用 `--command_sweep`。保留

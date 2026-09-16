@@ -103,6 +103,11 @@ python legged_gym/scripts/play.py --task carrybox --resume_path resources/ckpt/c
 
 ### CarryBox
 
+#### carrywith locomotion
+```bash
+python legged_gym/legged_gym/scripts/train_carry_locomotion.py --task carrybox_locomotion --init_policy_path legged_gym/logs/Ampstage1_UpAndWalk/Sep10_20-34-11_full_train_resume/model_33999.pt --num_envs 4096 --max_iterations 20000 --run_name loaded_velocity_tracking_v1 --headless
+```
+
 CarryBox is a challenging long-horizon task. We train it in two steps:
 
 1. **Initial training:** Use a relatively small AMP coefficient and relaxed termination conditions for easier learning. Run approximately 20k steps:
