@@ -178,21 +178,86 @@ def summarize_trial(condition, samples, *, policy_dt, requested_steps,
     return row
 
 
-AGGREGATE_METRICS = (
-    "vx_mae", "vx_rmse", "vy_mae", "vy_rmse",
-    "yaw_rate_mae", "yaw_rate_rmse",
-    "normalized_vector_error_rmse",
-    "box_vx_mae", "box_vy_mae", "box_yaw_rate_mae",
-    "bilateral_hand_contact_fraction", "grasp_loss_fraction",
-    "robot_box_distance_p95", "box_tilt_p95_deg",
+COMMON_INTEGRITY_METRICS = (
     "survival_duration_s",
+    "bilateral_hand_contact_fraction",
+    "grasp_loss_fraction",
+    "robot_box_distance_mean",
+    "robot_box_distance_p95",
+    "robot_box_distance_max",
+    "box_tilt_mean_deg",
+    "box_tilt_p95_deg",
+    "box_tilt_max_deg",
+    "robot_box_relative_linear_velocity_norm_mean",
+    "robot_box_relative_linear_velocity_norm_p95",
 )
-TRACKING_AGGREGATE_METRICS = {
-    "vx_mae", "vx_rmse", "vy_mae", "vy_rmse",
-    "yaw_rate_mae", "yaw_rate_rmse",
-    "normalized_vector_error_rmse",
-    "box_vx_mae", "box_vy_mae", "box_yaw_rate_mae",
+
+# Keep the mode summary focused on the behavior each command family probes.
+# The union is emitted as a stable CSV schema; non-applicable columns are NaN.
+MODE_TRACKING_METRICS = {
+    "stand": (
+        "xy_speed_mean",
+        "xy_speed_rms",
+        "yaw_rate_abs_mean",
+        "yaw_rate_rms",
+        "xy_displacement_drift",
+        "final_xy_displacement",
+        "yaw_drift_abs",
+        "max_yaw_drift",
+    ),
+    "vx": (
+        "vx_mae",
+        "vx_rmse",
+        "vx_bias",
+        "vx_p95",
+        "vy_leakage_rms",
+        "yaw_leakage_rms",
+        "box_vx_mae",
+        "box_vx_rmse",
+    ),
+    "vy": (
+        "vy_mae",
+        "vy_rmse",
+        "vy_bias",
+        "vy_p95",
+        "vx_leakage_rms",
+        "yaw_leakage_rms",
+        "box_vy_mae",
+        "box_vy_rmse",
+    ),
+    "yaw": (
+        "yaw_rate_mae",
+        "yaw_rate_rmse",
+        "yaw_rate_bias",
+        "yaw_rate_p95",
+        "vx_leakage_rms",
+        "vy_leakage_rms",
+        "xy_translation_speed_rms",
+        "box_yaw_rate_mae",
+        "box_yaw_rate_rmse",
+    ),
+    "mixed": (
+        "vx_mae",
+        "vx_rmse",
+        "vy_mae",
+        "vy_rmse",
+        "yaw_rate_mae",
+        "yaw_rate_rmse",
+        "normalized_vector_error_mean",
+        "normalized_vector_error_rmse",
+        "normalized_vector_error_p95",
+        "box_vx_mae",
+        "box_vy_mae",
+        "box_yaw_rate_mae",
+    ),
 }
+ALL_MODE_TRACKING_METRICS = tuple(
+    dict.fromkeys(
+        metric
+        for mode in MODES
+        for metric in MODE_TRACKING_METRICS[mode]
+    )
+)
 
 
 def _finite(rows, metric):
@@ -202,12 +267,21 @@ def _finite(rows, metric):
     ]
 
 
+def _add_distribution(row, prefix, values):
+    values = list(values)
+    row[f"{prefix}_mean"] = mean(values)
+    row[f"{prefix}_median"] = median(values) if values else float("nan")
+    row[f"{prefix}_p95"] = percentile(values, 95.0)
+
+
 def _mode_row(mode, rows):
     completed = [row for row in rows if int(row["trial_completed"])]
+    observed = [row for row in rows if int(row["measurement_steps"]) > 0]
     aggregate = {
         "mode": mode,
         "number_of_trials": len(rows),
         "number_of_completed_tracking_trials": len(completed),
+        "number_of_trials_with_measure_samples": len(observed),
         "completion_rate": mean(int(row["trial_completed"]) for row in rows),
         "final_confirmed_carry_rate": mean(
             int(row["final_confirmed_carry"]) for row in rows
@@ -216,14 +290,29 @@ def _mode_row(mode, rows):
             int(row["grasp_loss_occurrence"]) for row in rows
         ),
     }
-    # Incomplete trials never enter tracking aggregates. Integrity and survival
-    # aggregates retain partial failures so that box loss cannot be hidden.
-    for metric in AGGREGATE_METRICS:
-        source = completed if metric in TRACKING_AGGREGATE_METRICS else rows
-        values = _finite(source, metric)
-        aggregate[f"{metric}_mean"] = mean(values)
-        aggregate[f"{metric}_median"] = median(values) if values else float("nan")
-        aggregate[f"{metric}_p95"] = percentile(values, 95.0)
+
+    # Integrity/survival always include failed and incomplete trials. A failure
+    # before MEASURE naturally contributes NaN only to unavailable sample-based
+    # fields; it still contributes to completion and failure rates.
+    for metric in COMMON_INTEGRITY_METRICS:
+        _add_distribution(aggregate, metric, _finite(rows, metric))
+
+    # Emit a stable superset schema and make applicability explicit with NaN.
+    for metric in ALL_MODE_TRACKING_METRICS:
+        _add_distribution(aggregate, f"completed_only_{metric}", ())
+        _add_distribution(aggregate, f"all_observed_{metric}", ())
+
+    for metric in MODE_TRACKING_METRICS[mode]:
+        _add_distribution(
+            aggregate,
+            f"completed_only_{metric}",
+            _finite(completed, metric),
+        )
+        _add_distribution(
+            aggregate,
+            f"all_observed_{metric}",
+            _finite(observed, metric),
+        )
     return aggregate
 
 
@@ -240,6 +329,9 @@ def aggregate_by_mode(summary_rows):
             "number_of_trials": sum(row["number_of_trials"] for row in mode_rows),
             "number_of_completed_tracking_trials": sum(
                 row["number_of_completed_tracking_trials"] for row in mode_rows
+            ),
+            "number_of_trials_with_measure_samples": sum(
+                row["number_of_trials_with_measure_samples"] for row in mode_rows
             ),
         }
         total_weight = sum(weights[row["mode"]] for row in mode_rows)

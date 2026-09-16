@@ -3,6 +3,9 @@ from collections import Counter
 from experiments.carrybox_locomotion_eval.evaluation.command_suite import (
     MIXED_RANGES,
     MODES,
+    VX_VALUES,
+    VY_VALUES,
+    YAW_VALUES,
     build_command_suite,
 )
 
@@ -36,6 +39,12 @@ def test_default_suite_counts_ranges_and_metadata():
             <= MIXED_RANGES["yaw_rate"][1]
         )
     assert len({(item.vx, item.vy, item.yaw_rate) for item in mixed[:8]}) == 8
+    assert VX_VALUES == (-0.50, -0.25, 0.10, 0.40, 0.90, 1.20)
+    assert VY_VALUES == (-0.40, -0.20, -0.10, 0.10, 0.20, 0.40)
+    assert YAW_VALUES == (-0.50, -0.25, -0.10, 0.10, 0.25, 0.50)
+    assert all(abs(value) != 0.05 for value in VX_VALUES)
+    assert all(abs(value) != 0.05 for value in VY_VALUES)
+    assert all(abs(value) != 0.05 for value in YAW_VALUES)
 
 
 def test_mode_filter_restarts_trial_ids():

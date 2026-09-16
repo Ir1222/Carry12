@@ -36,19 +36,129 @@ class MetricTests(unittest.TestCase):
         self.assertAlmostEqual(row["vx_rmse"], 0.2)
         self.assertEqual(row["final_confirmed_carry"], 1)
 
-    def test_failed_trial_excluded_from_tracking_aggregate(self):
-        condition = CommandCondition("T0001", "vx", 0.0, 0.0, 0.0, 1, 0, 0.5)
-        row = summarize_trial(
-            condition, [sample(0.0)], policy_dt=0.02,
-            requested_steps=2, executed_steps=1, termination_reason="grasp_loss",
+    def test_completed_only_and_all_observed_expose_survivor_bias(self):
+        completed = summarize_trial(
+            CommandCondition("T0001", "vx", 0.5, 0.0, 0.0, 1, 0, 0.5),
+            [sample(0.6), sample(0.4)],
+            policy_dt=0.02,
+            requested_steps=2,
+            executed_steps=2,
+            termination_reason="completed",
         )
-        aggregates = aggregate_by_mode([row])
-        self.assertEqual(aggregates[0]["completion_rate"], 0.0)
-        self.assertTrue(math.isnan(aggregates[0]["vx_mae_mean"]))
+        failed_sample = sample(0.8)
+        failed_sample["bilateral_contact"] = 0
+        failed_sample["grasp_loss"] = 1
+        failed = summarize_trial(
+            CommandCondition("T0002", "vx", 0.5, 0.0, 0.0, 1, 0, 0.5),
+            [failed_sample],
+            policy_dt=0.02,
+            requested_steps=2,
+            executed_steps=1,
+            termination_reason="grasp_loss",
+        )
+        aggregates = aggregate_by_mode([completed, failed])
+        vx = aggregates[0]
+        self.assertEqual(vx["completion_rate"], 0.5)
+        self.assertAlmostEqual(vx["completed_only_vx_rmse_mean"], 0.1)
+        self.assertAlmostEqual(vx["all_observed_vx_rmse_mean"], 0.2)
+        self.assertNotEqual(
+            vx["completed_only_vx_rmse_mean"],
+            vx["all_observed_vx_rmse_mean"],
+        )
+        self.assertEqual(vx["grasp_loss_occurrence_rate"], 0.5)
+        self.assertEqual(vx["bilateral_hand_contact_fraction_mean"], 0.5)
+        self.assertEqual(vx["grasp_loss_fraction_mean"], 0.5)
+        self.assertEqual(vx["number_of_trials_with_measure_samples"], 2)
         self.assertEqual(aggregates[-2]["mode"], "macro_average")
         self.assertEqual(
             aggregates[-1]["mode"], "training_distribution_weighted_secondary"
         )
+
+    def test_mode_specific_tracking_schema(self):
+        rows = []
+        for index, mode in enumerate(("stand", "vx", "vy", "yaw", "mixed"), 1):
+            rows.append(
+                summarize_trial(
+                    CommandCondition(
+                        f"T{index:04d}", mode, 0.5, 0.0, 0.0, 1, 0, 0.5
+                    ),
+                    [sample(0.6), sample(0.4)],
+                    policy_dt=0.02,
+                    requested_steps=2,
+                    executed_steps=2,
+                    termination_reason="completed",
+                )
+            )
+        by_mode = {row["mode"]: row for row in aggregate_by_mode(rows)}
+        expected = {
+            "stand": (
+                "xy_speed_mean", "xy_speed_rms", "yaw_rate_abs_mean",
+                "yaw_rate_rms", "xy_displacement_drift",
+                "final_xy_displacement", "yaw_drift_abs", "max_yaw_drift",
+            ),
+            "vx": (
+                "vx_mae", "vx_rmse", "vx_bias", "vx_p95",
+                "vy_leakage_rms", "yaw_leakage_rms", "box_vx_mae",
+                "box_vx_rmse",
+            ),
+            "vy": (
+                "vy_mae", "vy_rmse", "vy_bias", "vy_p95",
+                "vx_leakage_rms", "yaw_leakage_rms", "box_vy_mae",
+                "box_vy_rmse",
+            ),
+            "yaw": (
+                "yaw_rate_mae", "yaw_rate_rmse", "yaw_rate_bias",
+                "yaw_rate_p95", "vx_leakage_rms", "vy_leakage_rms",
+                "xy_translation_speed_rms", "box_yaw_rate_mae",
+                "box_yaw_rate_rmse",
+            ),
+            "mixed": (
+                "vx_mae", "vx_rmse", "vy_mae", "vy_rmse",
+                "yaw_rate_mae", "yaw_rate_rmse",
+                "normalized_vector_error_mean",
+                "normalized_vector_error_rmse",
+                "normalized_vector_error_p95", "box_vx_mae", "box_vy_mae",
+                "box_yaw_rate_mae",
+            ),
+        }
+        for mode, metrics in expected.items():
+            for metric in metrics:
+                self.assertTrue(math.isfinite(
+                    by_mode[mode][f"completed_only_{metric}_mean"]
+                ))
+                self.assertTrue(math.isfinite(
+                    by_mode[mode][f"all_observed_{metric}_mean"]
+                ))
+
+        for mode in expected:
+            for metric in (
+                "survival_duration_s", "bilateral_hand_contact_fraction",
+                "grasp_loss_fraction", "robot_box_distance_p95",
+                "box_tilt_p95_deg",
+                "robot_box_relative_linear_velocity_norm_mean",
+                "robot_box_relative_linear_velocity_norm_p95",
+            ):
+                self.assertTrue(math.isfinite(by_mode[mode][f"{metric}_mean"]))
+        self.assertTrue(math.isnan(
+            by_mode["stand"]["all_observed_vx_mae_mean"]
+        ))
+
+    def test_pre_measure_failure_does_not_fabricate_tracking(self):
+        failed = summarize_trial(
+            CommandCondition("T0001", "vx", 0.5, 0.0, 0.0, 1, 0, 0.5),
+            [],
+            policy_dt=0.02,
+            requested_steps=2,
+            executed_steps=1,
+            termination_reason="grasp_loss",
+        )
+        vx = aggregate_by_mode([failed])[0]
+        self.assertEqual(vx["completion_rate"], 0.0)
+        self.assertEqual(vx["number_of_trials_with_measure_samples"], 0)
+        self.assertTrue(math.isnan(vx["completed_only_vx_rmse_mean"]))
+        self.assertTrue(math.isnan(vx["all_observed_vx_rmse_mean"]))
+        self.assertEqual(vx["grasp_loss_occurrence_rate"], 1.0)
+        self.assertAlmostEqual(vx["survival_duration_s_mean"], 0.02)
 
 
 if __name__ == "__main__":

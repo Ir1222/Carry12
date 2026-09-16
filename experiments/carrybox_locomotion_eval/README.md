@@ -45,3 +45,29 @@ sqrt((vx_error/1.2)^2 + (vy_error/0.4)^2 + (yaw_error/0.5)^2)
 The scales are the maximum absolute values of the full specialist ranges.
 With `--save_csv`, results go to `results/<checkpoint_label>/` as
 `command_manifest.csv`, `summary.csv`, `mode_summary.csv`, and `traces/*.csv`.
+
+The pure-axis benchmark values deliberately avoid the specialist's exact
+moving/non-moving threshold magnitude of `0.05`:
+
+```text
+vx  = [-0.50, -0.25,  0.10, 0.40, 0.90, 1.20]
+vy  = [-0.40, -0.20, -0.10, 0.10, 0.20, 0.40]
+yaw = [-0.50, -0.25, -0.10, 0.10, 0.25, 0.50]
+```
+
+`mode_summary.csv` separates task survival from tracking accuracy:
+
+- `completion_rate` is the fraction of command trials that survive through the
+  complete measurement window.
+- `completed_only_*` is the distribution of per-trial tracking metrics
+  conditioned on successful completion.
+- `all_observed_*` uses every finite per-trial metric produced by valid MEASURE
+  samples, including samples collected before a failed trial terminates. A
+  failure before MEASURE remains NaN for tracking; no numeric penalty or
+  fabricated sample is inserted.
+- Carry-integrity and survival fields always include incomplete trials.
+
+Mode-specific interpretation is: `stand` measures drift/stillness; `vx`
+measures forward tracking plus lateral/yaw leakage; `vy` measures lateral
+tracking plus forward/yaw leakage; `yaw` measures yaw tracking plus translation
+leakage; and `mixed` measures coupled three-DoF tracking.
