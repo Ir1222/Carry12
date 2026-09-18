@@ -31,29 +31,17 @@ def quantities(clip):
 
 
 def main():
-    data, kinematics, provenance = analyze.load_dataset()
+    data, _, _ = analyze.load_dataset()
     samples = {clip["name"]: quantities(clip) for clip in data}
-    result = {
-        "source_sha256": provenance,
-        "policy_dt": analyze.POLICY_DT,
-        "arm_joint_names": kinematics.names[15:],
-        "limitations": [
-            "Box center is the stored palm midpoint; heading is synthesized from pelvis.",
-            "No measured box size or contact forces. Nominal side errors are not contact tolerances.",
-            "Clips 2/3 have frozen arms; zero channels do not imply zero permissible motion.",
-            "No velocity samples cross clip boundaries; first samples are omitted.",
-        ],
-        "pooled": {key: analyze.summary(np.concatenate([v[key] for v in samples.values()]))
-                   for key in next(iter(samples.values()))},
-        "per_motion": {name: {key: analyze.summary(value) for key, value in values.items()}
-                       for name, values in samples.items()},
-    }
-    path = analyze.DEFAULT_REPORT / "constraint_statistics.json"
-    analyze.write_json(path, result)
-    for key, value in result["pooled"].items():
-        print(key, "min", np.round(value["min"], 4), "max", np.round(value["max"], 4),
-              "P5/P95", np.round(value["percentiles_5_25_50_75_95"][[0, 4]], 4))
-    print(path)
+    print("Reference box dimensions/contact are unmeasured; nominal side errors are illustrative.")
+    print("Engineering ranges are chosen manually in carrybox_locomotion_config.py.")
+    samples["pooled"] = {key: np.concatenate([v[key] for v in samples.values()])
+                         for key in next(iter(samples.values()))}
+    for name, values in samples.items():
+        print("\n" + name)
+        for key, value in values.items():
+            print(key, "min", np.round(value.min(0), 4), "max", np.round(value.max(0), 4),
+                  "P5/P95", np.round(np.percentile(value, [5, 95], axis=0), 4))
 
 
 if __name__ == "__main__":

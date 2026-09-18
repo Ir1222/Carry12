@@ -5,13 +5,10 @@ import math
 import torch
 from isaacgym.torch_utils import quat_rotate_inverse
 
-from legged_gym.carry_constraint_metrics import METRIC_NAMES, TEMPORAL_METRICS
 from legged_gym.utils.torch_utils import calc_heading_quat
 
 from .inference import assert_observation_compatibility
 from .metrics import PRESERVATION_METRICS, TRACKING_SCALES, summarize_trial
-
-assert PRESERVATION_METRICS == METRIC_NAMES
 
 
 TRACE_FIELDS = (
@@ -29,7 +26,7 @@ TRACE_FIELDS = (
     "base_yaw", "carry_heading_ref", "carry_heading_error",
     "legacy_body_vx", "legacy_body_vy", "legacy_body_yaw_rate",
     "action_delta_rms", "action_rate_rms", "torque_rms", "feet_slip",
-) + METRIC_NAMES
+) + PRESERVATION_METRICS
 
 
 def duration_steps(seconds, policy_dt, *, allow_zero=False):
@@ -41,7 +38,39 @@ def _scalar(tensor, env_id=0):
     return float(tensor[env_id].reshape(-1)[0].item())
 
 
-def _sample(env, condition, *, policy_step, time_s, actions, previous_actions):
+def _carry_sample(env, previous_hand_box=None, previous_box_pos=None):
+    """Evaluation-only measurements, independent of training logging buffers."""
+    c = env.cfg.rewards
+    torso = env.rigid_body_states[:1, env.carry_torso_index]
+    box = env.box_states[:1]
+    box_pos = quat_rotate_inverse(torso[:, 3:7], box[:, :3] - torso[:, :3])
+    hands = env.rigid_body_states[:1, env.carry_palm_indices, :3] - box[:, None, :3]
+    hand_box = quat_rotate_inverse(box[:, 3:7].expand(2, -1), hands.reshape(2, 3))
+    side_error = (hand_box[:, 1] * hand_box.new_tensor([1., -1.]) - env._box_size[0, 1] / 2).abs()
+    arms = env.dof_pos[0, env.carry_arm_indices]
+    arm_error = ((arms.new_tensor(c.carry_arm_range_lower) - arms).clamp_min(0)
+                 + (arms - arms.new_tensor(c.carry_arm_range_upper)).clamp_min(0))
+    position_error = ((box_pos.new_tensor(c.carry_box_relative_position_lower) - box_pos).clamp_min(0)
+                      + (box_pos - box_pos.new_tensor(c.carry_box_relative_position_upper)).clamp_min(0))
+    if previous_hand_box is None:
+        slip = [float("nan"), float("nan")]
+        speed = float("nan")
+    else:
+        slip = ((hand_box - previous_hand_box)[:, [0, 2]] / env.dt).norm(dim=-1).tolist()
+        speed = ((box_pos - previous_box_pos) / env.dt).norm().item()
+    metrics = {
+        "left_hand_side_error_m": side_error[0].item(),
+        "right_hand_side_error_m": side_error[1].item(),
+        "left_hand_tangential_slip_mps": slip[0],
+        "right_hand_tangential_slip_mps": slip[1],
+        "arm_range_violation_rad": arm_error.max().item(),
+        "box_relative_region_violation_m": position_error.norm().item(),
+        "box_relative_motion_error_mps": speed,
+    }
+    return metrics, hand_box, box_pos
+
+
+def _sample(env, condition, *, policy_step, time_s, actions, previous_actions, carry_sample):
     env_id = 0
     command = env.carry_policy_commands[env_id, :3]
     actual = torch.stack(
@@ -147,14 +176,7 @@ def _sample(env, condition, *, policy_step, time_s, actions, previous_actions):
         ),
         "feet_slip": float(feet_slip.item()),
     }
-    # Cache was computed from the same pre-reset physics state as the rewards.
-    # run_trial skips reset frames; invalid first-step derivatives remain NaN.
-    for name in METRIC_NAMES:
-        sample[name] = (
-            float("nan")
-            if name in TEMPORAL_METRICS and not bool(env.carry_motion_metric_valid[env_id])
-            else float(env.carry_metrics[name][env_id].item())
-        )
+    sample.update(carry_sample)
     if tuple(sample) != TRACE_FIELDS:
         raise AssertionError("Trace schema changed unexpectedly")
     return sample
@@ -188,6 +210,7 @@ def run_trial(env, policy, condition, *, warmup_s, duration_s, seed_fn):
         f"[{condition.trial_id}] mode={condition.mode} command={command} "
         f"seed={condition.seed}"
     )
+    _, previous_hand_box, previous_box_pos = _carry_sample(env)
     for step_index in range(total_steps):
         with torch.inference_mode():
             actions = policy(obs.detach())
@@ -199,6 +222,8 @@ def run_trial(env, policy, condition, *, warmup_s, duration_s, seed_fn):
         if bool(dones[0].item()):
             termination_reason = env.eval_last_termination_reason[0] or "termination"
             break
+        carry_sample, previous_hand_box, previous_box_pos = _carry_sample(
+            env, previous_hand_box, previous_box_pos)
         if step_index >= warmup_steps:
             samples.append(
                 _sample(
@@ -208,6 +233,7 @@ def run_trial(env, policy, condition, *, warmup_s, duration_s, seed_fn):
                     time_s=executed_steps * policy_dt,
                     actions=actions,
                     previous_actions=previous_actions,
+                    carry_sample=carry_sample,
                 )
             )
         previous_actions.copy_(actions)

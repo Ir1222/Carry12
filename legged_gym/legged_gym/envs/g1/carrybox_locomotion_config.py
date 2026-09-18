@@ -91,19 +91,14 @@ class G1Cfg(CarryBoxCfg):
             base_height = 0.0
             joint_power = 0.0
 
-        # Engineering feasible regions, NOT demonstration targets/confidence bounds.
-        # Offline evidence and per-joint broadening: analysis/carry_preservation/REPORT.md.
-        # Runtime uses these constants only; CarryWith is used only for RSI.
+        # Physical carry constraints; CarryWith is used only for RSI.
         carry_torso_link = "torso_link"
         carry_hand_links = ["left_palm_link", "right_palm_link"]
 
         # Left +Y / right -Y; use actual randomized box half-extents.
-        # Palms have 30 mm normal freedom and 10 mm edge allowance (virtual link /
-        # contact-patch mismatch). The synthetic dataset cannot measure contact bands.
         carry_hand_side_tolerance = 0.03  # m
         carry_hand_face_margin = 0.01  # m outside x/z face edges
         carry_hand_surface_violation_scale = 0.04  # m, post-dead-zone softness
-        # Observed tangential speeds: P95 ~0.211, max ~0.271 m/s.
         carry_hand_slip_tolerance = 0.35  # m/s, norm of local x/z velocity
         carry_hand_slip_violation_scale = 0.35  # m/s
 
@@ -124,14 +119,11 @@ class G1Cfg(CarryBoxCfg):
         ]
         carry_arm_violation_scale = 0.35  # rad beyond any one joint's range
 
-        # Observed min/max: x .327..364, y -.032...037, z .025...082 m.
-        # Widths are 9.4x / 5.9x / 7.0x the FULL observed spans, allowing reach,
-        # lateral balance and vertical load adjustment without a center target.
+        # Box workspace in torso_link coordinates (m), with no preferred center.
         carry_box_relative_position_lower = [0.18, -0.20, -0.15]
         carry_box_relative_position_upper = [0.53, 0.20, 0.25]
         carry_box_position_violation_scale = [0.10, 0.10, 0.10]  # m
-        # Observed |v| P95 [.081,.141,.155], max [.157,.320,.307] m/s.
-        # Engineering dead zones accommodate contact oscillations; no dt lock.
+        # Dead zone for the derivative of torso-relative box position.
         carry_box_relative_velocity_tolerance = [0.35, 0.45, 0.45]  # m/s
         carry_box_velocity_violation_scale = [0.35, 0.45, 0.45]  # m/s
 
