@@ -5,16 +5,24 @@ import math
 import numpy as np
 import torch
 
-from isaacgym.torch_utils import torch_rand_float
-
-from legged_gym import LEGGED_GYM_ROOT_DIR
-from legged_gym.carry_preservation import (
-    CarryCalibration, CarryMetricAccumulator, compute_preservation,
+from isaacgym.torch_utils import (
+    quat_conjugate, quat_mul, quat_rotate_inverse, torch_rand_float,
 )
 from legged_gym.utils.helpers import class_to_dict
 from legged_gym.utils.math import wrap_to_pi
 
 from .carrybox import LeggedRobot as CarryBoxBase
+
+
+def quaternion_log(q):
+    """Shortest SO(3) rotation vector for an XYZW quaternion (q and -q agree)."""
+    q = q / q.norm(dim=-1, keepdim=True).clamp_min(1.0e-12)
+    q = torch.where(q[..., 3:4] < 0.0, -q, q)
+    length = q[..., :3].norm(dim=-1, keepdim=True)
+    angle = 2.0 * torch.atan2(length, q[..., 3:4].clamp_min(0.0))
+    factor = torch.where(length > 1.0e-7, angle / length.clamp_min(1.0e-12),
+                         torch.full_like(length, 2.0))
+    return q[..., :3] * factor
 
 
 class LeggedRobot(CarryBoxBase):
@@ -51,14 +59,30 @@ class LeggedRobot(CarryBoxBase):
             requires_grad=False
         )
 
-        calibration_path = self.cfg.rewards.carry_calibration_file.format(
-            LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR
-        )
-        self.carry_calibration = CarryCalibration.load(
-            calibration_path, device=self.device, dtype=self.dof_pos.dtype
-        )
-        if not math.isclose(self.dt, self.carry_calibration.policy_dt, abs_tol=1e-8):
+        rewards = self.cfg.rewards
+        if not math.isclose(self.dt, rewards.carry_reference_policy_dt, abs_tol=1e-8):
             raise ValueError("Recalibrate carry motion widths for the changed policy dt")
+
+        # Small calibrated constants live in the task config; no analysis files
+        # or calibration objects are needed by the training environment.
+        self.carry_hand_directions = self.dof_pos.new_tensor([
+            rewards.carry_hand_direction_left, rewards.carry_hand_direction_right,
+        ])
+        self.carry_hand_side_sign = self.dof_pos.new_tensor([1.0, -1.0])
+        self.carry_hand_normal_sigma = self.dof_pos.new_tensor(rewards.carry_hand_normal_sigma)
+        self.carry_hand_direction_sigma = self.dof_pos.new_tensor(rewards.carry_hand_direction_sigma)
+        self.carry_arm_target = self.dof_pos.new_tensor(rewards.carry_arm_target)
+        self.carry_arm_sigma = self.dof_pos.new_tensor(rewards.carry_arm_sigma)
+        self.carry_box_relative_position_target = self.dof_pos.new_tensor(
+            rewards.carry_box_relative_position_target)
+        self.carry_box_relative_position_sigma = self.dof_pos.new_tensor(
+            rewards.carry_box_relative_position_sigma)
+        self.carry_box_relative_orientation_target = self.dof_pos.new_tensor(
+            rewards.carry_box_relative_orientation_target)
+        self.carry_box_relative_orientation_sigma = self.dof_pos.new_tensor(
+            rewards.carry_box_relative_orientation_sigma)
+        self.carry_box_relative_velocity_sigma = self.dof_pos.new_tensor(
+            rewards.carry_box_relative_velocity_sigma)
 
         def body_index(name):
             index = self.gym.find_actor_rigid_body_handle(
@@ -70,13 +94,13 @@ class LeggedRobot(CarryBoxBase):
 
         # This index deliberately does not replace upper_body_index (pelvis),
         # which defines the pretrained actor's observation/command semantics.
-        self.carry_torso_index = body_index(self.carry_calibration.torso_link)
+        self.carry_torso_index = body_index(rewards.carry_torso_link)
         self.carry_palm_indices = torch.tensor(
-            [body_index(name) for name in self.carry_calibration.hand_links],
+            [body_index(name) for name in rewards.carry_hand_links],
             device=self.device, dtype=torch.long,
         )
         self.carry_arm_indices = torch.tensor(
-            [self.dof_names.index(name) for name in self.carry_calibration.arm_joint_names],
+            [self.dof_names.index(name) for name in rewards.carry_arm_joint_names],
             device=self.device, dtype=torch.long,
         )
         self.carry_previous_relative_pos = torch.zeros(
@@ -85,12 +109,16 @@ class LeggedRobot(CarryBoxBase):
         self.carry_history_valid = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.bool
         )
-        self.carry_metric_accumulator = CarryMetricAccumulator(
-            self.num_envs, self.device, self.dof_pos.dtype
-        )
-        self.carry_preservation_rewards = {}
-        self.carry_preservation_metrics = torch.zeros_like(self.carry_metric_accumulator.sums)
-        self.carry_motion_metric_valid = self.carry_history_valid.clone()
+        self.carry_error_sums = {
+            name: self.dof_pos.new_zeros(self.num_envs) for name in (
+                "left_hand_side_error_m", "right_hand_side_error_m",
+                "box_relative_position_error_m", "box_relative_orientation_error_rad",
+                "box_relative_motion_error_mps", "arm_reference_error_rad",
+            )
+        }
+        # Count actual samples: the runner randomizes episode_length_buf at startup.
+        self.carry_error_steps = self.dof_pos.new_zeros(self.num_envs)
+        self.carry_motion_samples = self.dof_pos.new_zeros(self.num_envs)
 
     def _reset_actors(self, env_ids):
         """Reset robot state from one coherent CarryWith reference frame."""
@@ -193,11 +221,19 @@ class LeggedRobot(CarryBoxBase):
         """Use the parent bookkeeping, then restore carry-only state."""
         if len(env_ids) == 0:
             return
-        # Read terminal diagnostics before the parent replaces actor/box state
-        # and resets episode_length_buf. Counts do not use that randomized age.
-        carry_episode = self.carry_metric_accumulator.pop(env_ids)
         super().reset_idx(env_ids)
-        self.extras["episode"].update(carry_episode)
+        for name, sums in self.carry_error_sums.items():
+            counts = (self.carry_motion_samples if name == "box_relative_motion_error_mps"
+                      else self.carry_error_steps)
+            count = counts[env_ids].sum()
+            self.extras["episode"]["carry/" + name] = torch.where(
+                count > 0, sums[env_ids].sum() / count.clamp_min(1),
+                torch.full_like(count, float("nan")),
+            )
+            sums[env_ids] = 0.0
+        self.carry_error_steps[env_ids] = 0.0
+        self.carry_motion_samples[env_ids] = 0.0
+        self.carry_previous_relative_pos[env_ids] = 0.0
         self.carry_history_valid[env_ids] = False
         self.carry_policy_commands[env_ids, :3] = self.commands[env_ids, :3]
         self.is_stage_carry[env_ids] = True
@@ -347,44 +383,90 @@ class LeggedRobot(CarryBoxBase):
     def _reward_carry_bilateral_contact(self):
         return torch.all(self.hand_contact_filt, dim=-1).to(torch.float)
 
-    def compute_reward(self):
-        # The parent leaves extras in place on steps without resets. Remove the
-        # previous episode dictionary so the runner never logs stale episodes.
+    def _post_physics_step_callback(self):
+        super()._post_physics_step_callback()
+        # CarryBoxBase retains extras on non-reset steps, and the locomotion
+        # runner appends every present "episode" entry. Clear it once per step
+        # so a completed episode is logged only once (as before this refactor).
         self.extras.pop("episode", None)
-        torso = self.rigid_body_states[:, self.carry_torso_index]
-        self.carry_motion_metric_valid = self.carry_history_valid.clone()
-        rewards, metrics, relative_pos = compute_preservation(
-            torso[:, :3], torso[:, 3:7],
-            self.box_states[:, :3], self.box_states[:, 3:7],
-            self.rigid_body_states[:, self.carry_palm_indices, :3],
-            self._box_size, self.dof_pos[:, self.carry_arm_indices],
-            self.carry_previous_relative_pos, self.carry_motion_metric_valid,
-            self.dt, self.carry_calibration,
-        )
-        self.carry_preservation_rewards = rewards
-        self.carry_preservation_metrics = metrics
-        self.carry_metric_accumulator.add(metrics, self.carry_motion_metric_valid)
-        self.carry_previous_relative_pos.copy_(relative_pos)
-        self.carry_history_valid[:] = True
-        super().compute_reward()
+        self.carry_error_steps += 1
 
     def _reward_carry_hand_box_surface(self):
-        return self.carry_preservation_rewards["carry_hand_box_surface"]
+        hand_from_box = (self.rigid_body_states[:, self.carry_palm_indices, :3]
+                         - self.box_states[:, None, :3])
+        # Isaac Gym's inverse rotation takes flat batches of vectors/quaternions.
+        box_quat = self.box_states[:, None, 3:7].expand(-1, 2, -1).reshape(-1, 4)
+        torso_quat = self.rigid_body_states[:, self.carry_torso_index, 3:7]
+        torso_quat = torso_quat[:, None, :].expand(-1, 2, -1).reshape(-1, 4)
+        hand_box = quat_rotate_inverse(box_quat, hand_from_box.reshape(-1, 3)).reshape(-1, 2, 3)
+        hand_torso = quat_rotate_inverse(torso_quat, hand_from_box.reshape(-1, 3)).reshape(-1, 2, 3)
+
+        # Left = +Y face, right = -Y face, using each randomized box's dimensions.
+        half = 0.5 * self._box_size[:, None, :]
+        normal_error = self.carry_hand_side_sign * hand_box[..., 1] - half[..., 1]
+        overflow = (hand_box[..., [0, 2]].abs() - half[..., [0, 2]]).clamp_min(0.0)
+
+        # CarryWith box-to-palm rays are expressed in the torso frame.
+        length = hand_torso.norm(dim=-1)
+        direction = hand_torso / length.unsqueeze(-1).clamp_min(1.0e-9)
+        desired = self.carry_hand_directions.unsqueeze(0).expand_as(direction)
+        cross = torch.cross(direction, desired, dim=-1).norm(dim=-1)
+        dot = (direction * desired).sum(dim=-1)
+        direction_error = torch.atan2(cross, dot)
+        direction_error = torch.where(length > 1.0e-9, direction_error,
+                                      torch.full_like(direction_error, math.pi))
+        energy = (normal_error / self.carry_hand_normal_sigma).square()
+        energy += (overflow / self.carry_hand_normal_sigma[None, :, None]).square().sum(-1)
+        energy += (direction_error / self.carry_hand_direction_sigma).square()
+        self.carry_error_sums["left_hand_side_error_m"] += normal_error[:, 0].abs()
+        self.carry_error_sums["right_hand_side_error_m"] += normal_error[:, 1].abs()
+        return torch.exp(-0.25 * energy.sum(-1))
 
     def _reward_carry_relative_velocity(self):
-        return self.carry_preservation_rewards["carry_relative_velocity"]
+        torso = self.rigid_body_states[:, self.carry_torso_index]
+        relative_pos = quat_rotate_inverse(
+            torso[:, 3:7], self.box_states[:, :3] - torso[:, :3])
+        # Differentiate in the rotating torso frame, including during yaw motion.
+        velocity = (relative_pos - self.carry_previous_relative_pos) / self.dt
+        velocity = torch.where(
+            self.carry_history_valid[:, None], velocity, torch.zeros_like(velocity))
+        reward = torch.exp(
+            -0.5 * (velocity / self.carry_box_relative_velocity_sigma).square().sum(-1))
+        reward *= self.carry_history_valid  # No fabricated derivative after reset.
+        self.carry_error_sums["box_relative_motion_error_mps"] += velocity.norm(dim=-1)
+        self.carry_motion_samples += self.carry_history_valid
+        # The parent's reward dispatch calls this stateful term once per step.
+        self.carry_previous_relative_pos.copy_(relative_pos)
+        self.carry_history_valid[:] = True
+        return reward
 
     def _reward_carry_relative_position(self):
-        return self.carry_preservation_rewards["carry_relative_position"]
+        torso = self.rigid_body_states[:, self.carry_torso_index]
+        relative_pos = quat_rotate_inverse(
+            torso[:, 3:7], self.box_states[:, :3] - torso[:, :3])
+        error = relative_pos - self.carry_box_relative_position_target
+        self.carry_error_sums["box_relative_position_error_m"] += error.norm(dim=-1)
+        return torch.exp(
+            -0.5 * (error / self.carry_box_relative_position_sigma).square().sum(-1))
 
     def _reward_carry_relative_orientation(self):
-        return self.carry_preservation_rewards["carry_relative_orientation"]
+        torso_quat = self.rigid_body_states[:, self.carry_torso_index, 3:7]
+        relative_quat = quat_mul(quat_conjugate(torso_quat), self.box_states[:, 3:7])
+        target = self.carry_box_relative_orientation_target.expand_as(relative_quat)
+        error = quaternion_log(quat_mul(quat_conjugate(target), relative_quat))
+        self.carry_error_sums["box_relative_orientation_error_rad"] += error.norm(dim=-1)
+        # Axis-wise SO(3) widths preserve the deliberately larger yaw tolerance.
+        return torch.exp(
+            -0.5 * (error / self.carry_box_relative_orientation_sigma).square().sum(-1))
 
     def _reward_carry_box_tilt(self):
         return torch.sum(torch.square(self.projected_gravity_box[:, :2]), dim=-1)
 
     def _reward_carry_arm_pose(self):
-        return self.carry_preservation_rewards["carry_arm_pose"]
+        # Exactly the 14 named arm joints; waist and legs remain unsupervised.
+        error = self.dof_pos[:, self.carry_arm_indices] - self.carry_arm_target
+        self.carry_error_sums["arm_reference_error_rad"] += error.square().mean(-1).sqrt()
+        return torch.exp(-0.5 * (error / self.carry_arm_sigma).square().mean(-1))
 
     def _reward_zero_command_stillness(self):
         stillness = torch.exp(

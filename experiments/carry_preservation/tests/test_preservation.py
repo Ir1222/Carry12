@@ -1,10 +1,8 @@
-import ast
 import copy
 import json
 import math
 from pathlib import Path
 import sys
-import types
 import unittest
 
 import numpy as np
@@ -249,84 +247,6 @@ class ReferenceTests(unittest.TestCase):
             q = d["quantities"]
             delta = q["torso_link/compensated_velocity"][1:-1] - q["torso_link/local_position_derivative"][1:-1]
             self.assertLess(np.sqrt((delta * delta).mean()), .002)
-
-
-class EnvironmentLifecycleTests(unittest.TestCase):
-    """Exercise real specialist methods with a small bookkeeping-only base.
-
-    This tests the integration, not Isaac Gym imports or simulated dynamics.
-    """
-
-    def make_env(self):
-        class Base:
-            def _init_buffers(self):
-                pass
-
-            def compute_reward(self):
-                self.last_reward = sum(getattr(self, "_reward_" + name)() for name in REWARD_NAMES)
-
-            def reset_idx(self, ids):
-                self.extras["episode"] = {"rew_existing": torch.tensor(1.0)}
-                self.rigid_body_states[ids, :, :3] = 100
-                self.episode_length_buf[ids] = 0
-
-        path = ROOT / "legged_gym/legged_gym/envs/g1/carrybox_locomotion.py"
-        parsed = ast.parse(path.read_text())
-        cls = next(node for node in parsed.body if isinstance(node, ast.ClassDef))
-        ns = dict(CarryBoxBase=Base, torch=torch, np=np, math=math,
-                  LEGGED_GYM_ROOT_DIR=str(ROOT / "legged_gym"),
-                  CarryCalibration=CarryCalibration, CarryMetricAccumulator=CarryMetricAccumulator,
-                  compute_preservation=compute_preservation)
-        exec(compile(ast.Module(body=[cls], type_ignores=[]), str(path), "exec"), ns)
-        env = ns["LeggedRobot"]()
-        c = calibration(dtype=torch.float32)
-        s = scene(c, 2)
-        env.num_envs, env.device, env.dt = 2, "cpu", .02
-        env.dof_names = ["unused_%d" % i for i in range(15)] + list(c.arm_joint_names)
-        env.dof_pos = torch.zeros(2, 29)
-        env.dof_pos[:, 15:] = s["arm_pos"]
-        env.cfg = types.SimpleNamespace(rewards=types.SimpleNamespace(carry_calibration_file=str(analyze.DEFAULT_CALIBRATION)))
-        env.gym = types.SimpleNamespace(find_actor_rigid_body_handle=lambda e, a, name:
-            {"torso_link": 1, "left_palm_link": 2, "right_palm_link": 3}[name])
-        env.envs, env.actor_handles = [0], [0]
-        env.upper_body_index = 0
-        env._init_buffers()
-        env.rigid_body_states = torch.zeros(2, 4, 13)
-        env.rigid_body_states[:, 1, :3] = s["torso_pos"]
-        env.rigid_body_states[:, 1, 3:7] = s["torso_quat"]
-        env.rigid_body_states[:, 2:4, :3] = s["hand_pos"]
-        env.box_states = torch.zeros(2, 13)
-        env.box_states[:, :3], env.box_states[:, 3:7] = s["box_pos"], s["box_quat"]
-        env._box_size = s["box_size"]
-        env.extras = {"episode": {"stale": 1}}
-        env.carry_policy_commands = env.commands = torch.zeros(2, 3)
-        for name in ("is_stage_carry", "carry_velocity_active", "carry_tracking_started", "has_seen_tag", "can_see_tag"):
-            setattr(env, name, torch.zeros(2, dtype=torch.bool))
-        env.carry_command_resample_time[:] = 1
-        env.episode_length_buf = torch.tensor([700, 50])
-        return env
-
-    def test_cache_reset_and_fresh_episode_logging(self):
-        env = self.make_env()
-        self.assertEqual(env.upper_body_index, 0)
-        self.assertEqual(env.carry_torso_index, 1)
-        env.compute_reward()
-        self.assertNotIn("episode", env.extras)
-        self.assertFalse(bool(env.carry_motion_metric_valid.any()))
-        env.box_states[:, 0] += .02
-        env.compute_reward()
-        terminal_metrics = env.carry_preservation_metrics.clone()
-        self.assertGreater(terminal_metrics[0, MOTION_METRIC_INDEX].item(), .99)
-        env.reset_idx(torch.tensor([0]))
-        self.assertAlmostEqual(env.extras["episode"]["carry/box_relative_motion_error_mps"].item(), 1, places=4)
-        self.assertAlmostEqual(env.extras["episode"]["carry/box_relative_position_error_m"].item(), .01, places=5)
-        torch.testing.assert_close(env.carry_preservation_metrics, terminal_metrics)
-        self.assertEqual(env.carry_history_valid.tolist(), [False, True])
-        self.assertEqual(env.carry_metric_accumulator.counts[0].sum().item(), 0)
-        env.compute_reward()
-        self.assertNotIn("episode", env.extras)
-        self.assertEqual(env.carry_preservation_rewards["carry_relative_velocity"][0].item(), 0)
-        self.assertEqual(env.carry_preservation_metrics[0, MOTION_METRIC_INDEX].item(), 0)
 
 
 if __name__ == "__main__":

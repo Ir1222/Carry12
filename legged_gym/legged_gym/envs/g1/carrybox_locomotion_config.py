@@ -90,9 +90,51 @@ class G1Cfg(CarryBoxCfg):
             base_height = 0.0
             joint_power = 0.0
 
-        carry_calibration_file = (
-            "{LEGGED_GYM_ROOT_DIR}/resources/config/carry_preservation.json"
-        )
+        # Final CarryWith calibration, copied without rounding from
+        # resources/config/carry_preservation.json at commit 7cb664d.
+        # That JSON and analysis/carry_preservation/statistics.json stay offline;
+        # training reads only these constants. Regression tests check equality.
+        carry_reference_policy_dt = 0.02
+        carry_torso_link = "torso_link"
+        carry_hand_links = ["left_palm_link", "right_palm_link"]
+
+        # Unit box-to-palm rays in the torso frame, from the CarryWith clips.
+        # Left must meet the box's +Y face; right must meet its -Y face.
+        carry_hand_direction_left = [-0.18807008519022791, 0.981842058522644, -0.024815623557696863]
+        carry_hand_direction_right = [0.2292152654769457, -0.9729077921719884, 0.030179297595546023]
+        carry_hand_normal_sigma = [0.02, 0.02]  # m; also used for face-boundary overflow
+        carry_hand_direction_sigma = [0.1302497874351225, 0.11122129436107886]  # rad
+
+        # Arm-only prior: the order below matches target/sigma, with no waist.
+        carry_arm_joint_names = [
+            "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
+            "left_elbow_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
+            "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
+            "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
+        ]
+        carry_arm_target = [  # rad
+            -0.12775056064128876, 0.07655864953994751, -0.0941256582736969,
+            0.1573413610458374, -0.24472947418689728, 0.0, 0.0,
+            -0.43349742889404297, -0.28036007285118103, 0.24257469177246094,
+            0.46407607197761536, 0.2483402043581009, 0.0, 0.0,
+        ]
+        carry_arm_sigma = [0.15] * 14  # rad
+
+        # torso_link origin -> box center, expressed in torso axes (m).
+        carry_box_relative_position_target = [
+            0.34750078866225004, -0.003911388585662426, 0.049450910653684545,
+        ]
+        carry_box_relative_position_sigma = [0.03, 0.038154325120839785, 0.03466218700457088]
+        # Torso-relative XYZW quaternion; SO(3) widths in rad, with weak yaw.
+        carry_box_relative_orientation_target = [
+            -0.0163041585521531, -0.055856736281097885, 0.022884953268880424, 0.9980433248811456,
+        ]
+        carry_box_relative_orientation_sigma = [
+            0.09012323316733016, 0.11665271531784734, 0.47389821765272633,
+        ]
+        # Finite difference of torso-frame position at policy dt, target zero (m/s).
+        carry_box_relative_velocity_sigma = [0.1751883601826239, 0.314361221419571, 0.3053264617085051]
+
         box_drop_height = 0.15
         robot_box_max_distance = 1.0
         box_tilt_termination_deg = 70.0
