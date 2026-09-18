@@ -1,0 +1,428 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1550" height="1160" viewBox="0 0 1550 1160">
+<style>
+text{font-family:Arial,Helvetica,sans-serif;fill:#1f2933}
+.title{font-size:20px;font-weight:700}
+.subtitle{font-size:12px;fill:#52606d}
+.axis{stroke:#52606d;stroke-width:1}
+.grid{stroke:#d9e2ec;stroke-width:1}
+.ideal{stroke:#7b8794;stroke-width:1.5;stroke-dasharray:5 5}
+.label{font-size:11px;fill:#334e68}
+.small{font-size:9px;fill:#52606d}
+</style>
+<text x="28.00" y="36.00" class="title" text-anchor="start">Each velocity command paired with its actual mean</text>
+<text x="28.00" y="58.00" class="subtitle" text-anchor="start">Open marker is command. Filled marker is actual velocity mean. Vertical line length is signed tracking error.</text>
+<text x="780.00" y="98.00" class="label" text-anchor="middle">vx command vs actual (m/s)</text>
+<line x1="90.00" y1="322.26" x2="1470.00" y2="322.26" class="grid"/>
+<text x="82.00" y="325.26" class="small" text-anchor="end">-0.5</text>
+<line x1="90.00" y1="266.52" x2="1470.00" y2="266.52" class="grid"/>
+<text x="82.00" y="269.52" class="small" text-anchor="end">0</text>
+<line x1="90.00" y1="210.78" x2="1470.00" y2="210.78" class="grid"/>
+<text x="82.00" y="213.78" class="small" text-anchor="end">0.5</text>
+<line x1="90.00" y1="155.04" x2="1470.00" y2="155.04" class="grid"/>
+<text x="82.00" y="158.04" class="small" text-anchor="end">1.0</text>
+<line x1="90.00" y1="99.30" x2="1470.00" y2="99.30" class="grid"/>
+<text x="82.00" y="102.30" class="small" text-anchor="end">1.5</text>
+<line x1="90.00" y1="345.00" x2="1470.00" y2="345.00" class="axis"/>
+<line x1="90.00" y1="110.00" x2="90.00" y2="345.00" class="axis"/>
+<line x1="90.00" y1="266.52" x2="1470.00" y2="266.52" stroke="#7b8794" stroke-width="1" stroke-dasharray="3 4"/>
+<line x1="113.00" y1="322.26" x2="113.00" y2="310.01" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="113.00" cy="322.26" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="113.00" cy="310.01" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="113.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 113.00 359.00)">T0002:vx</text>
+<line x1="159.00" y1="294.39" x2="159.00" y2="283.29" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="159.00" cy="294.39" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="159.00" cy="283.29" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="159.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 159.00 359.00)">T0003:vx</text>
+<line x1="205.00" y1="255.37" x2="205.00" y2="260.28" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="205.00" cy="255.37" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="205.00" cy="260.28" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="205.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 205.00 359.00)">T0004:vx</text>
+<line x1="251.00" y1="221.93" x2="251.00" y2="219.55" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="251.00" cy="221.93" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="251.00" cy="219.55" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="251.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 251.00 359.00)">T0005:vx</text>
+<line x1="297.00" y1="166.19" x2="297.00" y2="216.00" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="297.00" cy="166.19" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="297.00" cy="216.00" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="297.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 297.00 359.00)">T0006:vx</text>
+<line x1="343.00" y1="132.74" x2="343.00" y2="144.06" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="343.00" cy="132.74" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="343.00" cy="144.06" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="343.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 343.00 359.00)">T0007:vx</text>
+<line x1="389.00" y1="311.11" x2="389.00" y2="281.55" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="389.00" cy="311.11" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="389.00" cy="281.55" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="389.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 389.00 359.00)">T0020:mixed</text>
+<line x1="435.00" y1="311.11" x2="435.00" y2="303.55" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="435.00" cy="311.11" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="435.00" cy="303.55" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="435.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 435.00 359.00)">T0021:mixed</text>
+<line x1="481.00" y1="311.11" x2="481.00" y2="308.01" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="481.00" cy="311.11" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="481.00" cy="308.01" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="481.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 481.00 359.00)">T0022:mixed</text>
+<line x1="527.00" y1="311.11" x2="527.00" y2="293.75" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="527.00" cy="311.11" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="527.00" cy="293.75" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="527.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 527.00 359.00)">T0023:mixed</text>
+<line x1="573.00" y1="306.37" x2="573.00" y2="297.54" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="573.00" cy="306.37" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="573.00" cy="297.54" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="573.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 573.00 359.00)">T0043:mixed</text>
+<line x1="619.00" y1="301.63" x2="619.00" y2="291.97" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="619.00" cy="301.63" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="619.00" cy="291.97" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="619.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 619.00 359.00)">T0035:mixed</text>
+<line x1="665.00" y1="292.16" x2="665.00" y2="285.88" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="665.00" cy="292.16" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="665.00" cy="285.88" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="665.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 665.00 359.00)">T0031:mixed</text>
+<line x1="711.00" y1="282.68" x2="711.00" y2="272.22" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="711.00" cy="282.68" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="711.00" cy="272.22" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="711.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 711.00 359.00)">T0039:mixed</text>
+<line x1="757.00" y1="273.21" x2="757.00" y2="267.15" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="757.00" cy="273.21" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="757.00" cy="267.15" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="757.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 757.00 359.00)">T0029:mixed</text>
+<line x1="803.00" y1="263.73" x2="803.00" y2="263.71" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="803.00" cy="263.73" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="803.00" cy="263.71" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="803.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 803.00 359.00)">T0037:mixed</text>
+<line x1="849.00" y1="254.26" x2="849.00" y2="257.80" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="849.00" cy="254.26" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="849.00" cy="257.80" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="849.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 849.00 359.00)">T0033:mixed</text>
+<line x1="895.00" y1="244.78" x2="895.00" y2="237.25" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="895.00" cy="244.78" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="895.00" cy="237.25" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="895.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 895.00 359.00)">T0041:mixed</text>
+<line x1="941.00" y1="235.30" x2="941.00" y2="238.49" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="941.00" cy="235.30" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="941.00" cy="238.49" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="941.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 941.00 359.00)">T0028:mixed</text>
+<line x1="987.00" y1="225.83" x2="987.00" y2="222.84" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="987.00" cy="225.83" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="987.00" cy="222.84" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="987.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 987.00 359.00)">T0036:mixed</text>
+<line x1="1033.00" y1="216.35" x2="1033.00" y2="215.79" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1033.00" cy="216.35" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1033.00" cy="215.79" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="1033.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1033.00 359.00)">T0032:mixed</text>
+<line x1="1079.00" y1="206.88" x2="1079.00" y2="203.48" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1079.00" cy="206.88" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1079.00" cy="203.48" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="1079.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1079.00 359.00)">T0040:mixed</text>
+<line x1="1125.00" y1="197.40" x2="1125.00" y2="194.21" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1125.00" cy="197.40" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1125.00" cy="194.21" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="1125.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1125.00 359.00)">T0030:mixed</text>
+<line x1="1171.00" y1="187.92" x2="1171.00" y2="193.03" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1171.00" cy="187.92" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1171.00" cy="193.03" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="1171.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1171.00 359.00)">T0038:mixed</text>
+<line x1="1217.00" y1="178.45" x2="1217.00" y2="212.26" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1217.00" cy="178.45" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1217.00" cy="212.26" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="1217.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1217.00 359.00)">T0034:mixed</text>
+<line x1="1263.00" y1="168.97" x2="1263.00" y2="208.47" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1263.00" cy="168.97" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1263.00" cy="208.47" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="1263.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1263.00 359.00)">T0042:mixed</text>
+<line x1="1309.00" y1="159.50" x2="1309.00" y2="217.37" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1309.00" cy="159.50" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1309.00" cy="217.37" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="1309.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1309.00 359.00)">T0024:mixed</text>
+<line x1="1355.00" y1="159.50" x2="1355.00" y2="226.38" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1355.00" cy="159.50" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1355.00" cy="226.38" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="1355.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1355.00 359.00)">T0025:mixed</text>
+<line x1="1401.00" y1="159.50" x2="1401.00" y2="174.56" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1401.00" cy="159.50" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1401.00" cy="174.56" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="1401.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1401.00 359.00)">T0026:mixed</text>
+<line x1="1447.00" y1="159.50" x2="1447.00" y2="219.27" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1447.00" cy="159.50" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1447.00" cy="219.27" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="1447.00" y="359.00" class="small" text-anchor="end" transform="rotate(-55 1447.00 359.00)">T0027:mixed</text>
+<circle cx="1340.00" cy="82.00" r="4.20" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<text x="1350.00" y="86.00" class="small" text-anchor="start">cmd</text>
+<circle cx="1392.00" cy="82.00" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.0"/>
+<text x="1402.00" y="86.00" class="small" text-anchor="start">actual</text>
+<text x="780.00" y="438.00" class="label" text-anchor="middle">vy command vs actual (m/s)</text>
+<line x1="90.00" y1="684.50" x2="1470.00" y2="684.50" class="grid"/>
+<text x="82.00" y="687.50" class="small" text-anchor="end">-0.5</text>
+<line x1="90.00" y1="628.90" x2="1470.00" y2="628.90" class="grid"/>
+<text x="82.00" y="631.90" class="small" text-anchor="end">-0.25</text>
+<line x1="90.00" y1="573.29" x2="1470.00" y2="573.29" class="grid"/>
+<text x="82.00" y="576.29" class="small" text-anchor="end">0</text>
+<line x1="90.00" y1="517.69" x2="1470.00" y2="517.69" class="grid"/>
+<text x="82.00" y="520.69" class="small" text-anchor="end">0.25</text>
+<line x1="90.00" y1="462.08" x2="1470.00" y2="462.08" class="grid"/>
+<text x="82.00" y="465.08" class="small" text-anchor="end">0.5</text>
+<line x1="90.00" y1="685.00" x2="1470.00" y2="685.00" class="axis"/>
+<line x1="90.00" y1="450.00" x2="90.00" y2="685.00" class="axis"/>
+<line x1="90.00" y1="573.29" x2="1470.00" y2="573.29" stroke="#7b8794" stroke-width="1" stroke-dasharray="3 4"/>
+<line x1="113.00" y1="662.26" x2="113.00" y2="649.52" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="113.00" cy="662.26" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="113.00" cy="649.52" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="113.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 113.00 699.00)">T0008:vy</text>
+<line x1="159.00" y1="617.78" x2="159.00" y2="595.26" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="159.00" cy="617.78" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="159.00" cy="595.26" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="159.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 159.00 699.00)">T0009:vy</text>
+<line x1="205.00" y1="595.53" x2="205.00" y2="584.58" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="205.00" cy="595.53" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="205.00" cy="584.58" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="205.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 205.00 699.00)">T0010:vy</text>
+<line x1="251.00" y1="551.05" x2="251.00" y2="564.36" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="251.00" cy="551.05" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="251.00" cy="564.36" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="251.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 251.00 699.00)">T0011:vy</text>
+<line x1="297.00" y1="528.81" x2="297.00" y2="549.46" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="297.00" cy="528.81" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="297.00" cy="549.46" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="297.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 297.00 699.00)">T0012:vy</text>
+<line x1="343.00" y1="484.33" x2="343.00" y2="501.85" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="343.00" cy="484.33" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="343.00" cy="501.85" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="343.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 343.00 699.00)">T0013:vy</text>
+<line x1="389.00" y1="644.46" x2="389.00" y2="616.19" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="389.00" cy="644.46" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="389.00" cy="616.19" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="389.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 389.00 699.00)">T0020:mixed</text>
+<line x1="435.00" y1="644.46" x2="435.00" y2="627.86" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="435.00" cy="644.46" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="435.00" cy="627.86" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="435.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 435.00 699.00)">T0021:mixed</text>
+<line x1="481.00" y1="644.46" x2="481.00" y2="616.05" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="481.00" cy="644.46" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="481.00" cy="616.05" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="481.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 481.00 699.00)">T0024:mixed</text>
+<line x1="527.00" y1="644.46" x2="527.00" y2="585.69" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="527.00" cy="644.46" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="527.00" cy="585.69" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="527.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 527.00 699.00)">T0025:mixed</text>
+<line x1="573.00" y1="639.19" x2="573.00" y2="619.96" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="573.00" cy="639.19" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="573.00" cy="619.96" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="573.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 573.00 699.00)">T0036:mixed</text>
+<line x1="619.00" y1="628.65" x2="619.00" y2="602.11" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="619.00" cy="628.65" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="619.00" cy="602.11" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="619.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 619.00 699.00)">T0030:mixed</text>
+<line x1="665.00" y1="623.38" x2="665.00" y2="616.60" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="665.00" cy="623.38" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="665.00" cy="616.60" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="665.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 665.00 699.00)">T0039:mixed</text>
+<line x1="711.00" y1="612.83" x2="711.00" y2="604.16" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="711.00" cy="612.83" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="711.00" cy="604.16" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="711.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 711.00 699.00)">T0033:mixed</text>
+<line x1="757.00" y1="607.56" x2="757.00" y2="613.09" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="757.00" cy="607.56" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="757.00" cy="613.09" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="757.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 757.00 699.00)">T0042:mixed</text>
+<line x1="803.00" y1="597.02" x2="803.00" y2="620.07" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="803.00" cy="597.02" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="803.00" cy="620.07" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="803.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 803.00 699.00)">T0028:mixed</text>
+<line x1="849.00" y1="591.74" x2="849.00" y2="581.87" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="849.00" cy="591.74" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="849.00" cy="581.87" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="849.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 849.00 699.00)">T0037:mixed</text>
+<line x1="895.00" y1="581.20" x2="895.00" y2="576.56" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="895.00" cy="581.20" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="895.00" cy="576.56" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="895.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 895.00 699.00)">T0031:mixed</text>
+<line x1="941.00" y1="575.93" x2="941.00" y2="566.62" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="941.00" cy="575.93" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="941.00" cy="566.62" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="941.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 941.00 699.00)">T0040:mixed</text>
+<line x1="987.00" y1="565.38" x2="987.00" y2="590.04" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="987.00" cy="565.38" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="987.00" cy="590.04" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="987.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 987.00 699.00)">T0034:mixed</text>
+<line x1="1033.00" y1="560.11" x2="1033.00" y2="557.47" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1033.00" cy="560.11" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1033.00" cy="557.47" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1033.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1033.00 699.00)">T0043:mixed</text>
+<line x1="1079.00" y1="549.57" x2="1079.00" y2="555.72" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1079.00" cy="549.57" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1079.00" cy="555.72" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1079.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1079.00 699.00)">T0029:mixed</text>
+<line x1="1125.00" y1="544.30" x2="1125.00" y2="535.38" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1125.00" cy="544.30" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1125.00" cy="535.38" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1125.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1125.00 699.00)">T0038:mixed</text>
+<line x1="1171.00" y1="533.75" x2="1171.00" y2="540.22" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1171.00" cy="533.75" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1171.00" cy="540.22" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1171.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1171.00 699.00)">T0032:mixed</text>
+<line x1="1217.00" y1="528.48" x2="1217.00" y2="530.17" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1217.00" cy="528.48" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1217.00" cy="530.17" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1217.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1217.00 699.00)">T0041:mixed</text>
+<line x1="1263.00" y1="517.94" x2="1263.00" y2="514.09" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1263.00" cy="517.94" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1263.00" cy="514.09" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1263.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1263.00 699.00)">T0035:mixed</text>
+<line x1="1309.00" y1="502.12" x2="1309.00" y2="493.52" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1309.00" cy="502.12" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1309.00" cy="493.52" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1309.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1309.00 699.00)">T0022:mixed</text>
+<line x1="1355.00" y1="502.12" x2="1355.00" y2="489.21" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1355.00" cy="502.12" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1355.00" cy="489.21" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1355.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1355.00 699.00)">T0023:mixed</text>
+<line x1="1401.00" y1="502.12" x2="1401.00" y2="472.74" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1401.00" cy="502.12" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1401.00" cy="472.74" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1401.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1401.00 699.00)">T0026:mixed</text>
+<line x1="1447.00" y1="502.12" x2="1447.00" y2="569.83" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1447.00" cy="502.12" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1447.00" cy="569.83" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="1447.00" y="699.00" class="small" text-anchor="end" transform="rotate(-55 1447.00 699.00)">T0027:mixed</text>
+<circle cx="1340.00" cy="422.00" r="4.20" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<text x="1350.00" y="426.00" class="small" text-anchor="start">cmd</text>
+<circle cx="1392.00" cy="422.00" r="5.00" fill="#2f855a" stroke="#263238" stroke-width="1.0"/>
+<text x="1402.00" y="426.00" class="small" text-anchor="start">actual</text>
+<text x="780.00" y="778.00" class="label" text-anchor="middle">yaw command vs actual (rad/s)</text>
+<line x1="90.00" y1="1015.28" x2="1470.00" y2="1015.28" class="grid"/>
+<text x="82.00" y="1018.28" class="small" text-anchor="end">-1.5</text>
+<line x1="90.00" y1="964.65" x2="1470.00" y2="964.65" class="grid"/>
+<text x="82.00" y="967.65" class="small" text-anchor="end">-1.0</text>
+<line x1="90.00" y1="914.01" x2="1470.00" y2="914.01" class="grid"/>
+<text x="82.00" y="917.01" class="small" text-anchor="end">-0.5</text>
+<line x1="90.00" y1="863.38" x2="1470.00" y2="863.38" class="grid"/>
+<text x="82.00" y="866.38" class="small" text-anchor="end">0</text>
+<line x1="90.00" y1="812.74" x2="1470.00" y2="812.74" class="grid"/>
+<text x="82.00" y="815.74" class="small" text-anchor="end">0.5</text>
+<line x1="90.00" y1="1025.00" x2="1470.00" y2="1025.00" class="axis"/>
+<line x1="90.00" y1="790.00" x2="90.00" y2="1025.00" class="axis"/>
+<line x1="90.00" y1="863.38" x2="1470.00" y2="863.38" stroke="#7b8794" stroke-width="1" stroke-dasharray="3 4"/>
+<line x1="113.00" y1="914.01" x2="113.00" y2="919.00" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="113.00" cy="914.01" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="113.00" cy="919.00" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="113.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 113.00 1039.00)">T0014:yaw</text>
+<line x1="159.00" y1="888.69" x2="159.00" y2="881.98" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="159.00" cy="888.69" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="159.00" cy="881.98" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="159.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 159.00 1039.00)">T0015:yaw</text>
+<line x1="205.00" y1="873.50" x2="205.00" y2="897.47" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="205.00" cy="873.50" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="205.00" cy="897.47" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="205.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 205.00 1039.00)">T0016:yaw</text>
+<line x1="251.00" y1="853.25" x2="251.00" y2="855.87" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="251.00" cy="853.25" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="251.00" cy="855.87" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="251.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 251.00 1039.00)">T0017:yaw</text>
+<line x1="297.00" y1="838.06" x2="297.00" y2="850.41" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="297.00" cy="838.06" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="297.00" cy="850.41" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="297.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 297.00 1039.00)">T0018:yaw</text>
+<line x1="343.00" y1="812.74" x2="343.00" y2="816.24" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="343.00" cy="812.74" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="343.00" cy="816.24" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="343.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 343.00 1039.00)">T0019:yaw</text>
+<line x1="389.00" y1="903.88" x2="389.00" y2="902.48" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="389.00" cy="903.88" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="389.00" cy="902.48" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="389.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 389.00 1039.00)">T0020:mixed</text>
+<line x1="435.00" y1="903.88" x2="435.00" y2="905.45" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="435.00" cy="903.88" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="435.00" cy="905.45" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="435.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 435.00 1039.00)">T0022:mixed</text>
+<line x1="481.00" y1="903.88" x2="481.00" y2="1002.26" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="481.00" cy="903.88" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="481.00" cy="1002.26" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="481.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 481.00 1039.00)">T0024:mixed</text>
+<line x1="527.00" y1="903.88" x2="527.00" y2="919.79" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="527.00" cy="903.88" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="527.00" cy="919.79" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="527.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 527.00 1039.00)">T0026:mixed</text>
+<line x1="573.00" y1="900.64" x2="573.00" y2="907.03" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="573.00" cy="900.64" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="573.00" cy="907.03" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="573.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 573.00 1039.00)">T0032:mixed</text>
+<line x1="619.00" y1="897.40" x2="619.00" y2="882.03" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="619.00" cy="897.40" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="619.00" cy="882.03" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="619.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 619.00 1039.00)">T0037:mixed</text>
+<line x1="665.00" y1="894.16" x2="665.00" y2="943.48" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="665.00" cy="894.16" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="665.00" cy="943.48" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="665.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 665.00 1039.00)">T0042:mixed</text>
+<line x1="711.00" y1="887.68" x2="711.00" y2="907.80" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="711.00" cy="887.68" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="711.00" cy="907.80" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="711.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 711.00 1039.00)">T0028:mixed</text>
+<line x1="757.00" y1="884.44" x2="757.00" y2="882.05" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="757.00" cy="884.44" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="757.00" cy="882.05" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="757.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 757.00 1039.00)">T0033:mixed</text>
+<line x1="803.00" y1="881.20" x2="803.00" y2="886.37" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="803.00" cy="881.20" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="803.00" cy="886.37" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="803.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 803.00 1039.00)">T0038:mixed</text>
+<line x1="849.00" y1="877.96" x2="849.00" y2="880.78" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="849.00" cy="877.96" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="849.00" cy="880.78" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="849.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 849.00 1039.00)">T0043:mixed</text>
+<line x1="895.00" y1="871.48" x2="895.00" y2="867.10" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="895.00" cy="871.48" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="895.00" cy="867.10" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="895.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 895.00 1039.00)">T0029:mixed</text>
+<line x1="941.00" y1="868.24" x2="941.00" y2="932.77" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="941.00" cy="868.24" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="941.00" cy="932.77" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="941.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 941.00 1039.00)">T0034:mixed</text>
+<line x1="987.00" y1="865.00" x2="987.00" y2="857.73" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="987.00" cy="865.00" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="987.00" cy="857.73" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="987.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 987.00 1039.00)">T0039:mixed</text>
+<line x1="1033.00" y1="855.27" x2="1033.00" y2="848.15" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1033.00" cy="855.27" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1033.00" cy="848.15" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="1033.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1033.00 1039.00)">T0030:mixed</text>
+<line x1="1079.00" y1="852.03" x2="1079.00" y2="856.37" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1079.00" cy="852.03" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1079.00" cy="856.37" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="1079.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1079.00 1039.00)">T0035:mixed</text>
+<line x1="1125.00" y1="848.79" x2="1125.00" y2="850.96" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1125.00" cy="848.79" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1125.00" cy="850.96" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="1125.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1125.00 1039.00)">T0040:mixed</text>
+<line x1="1171.00" y1="839.07" x2="1171.00" y2="834.49" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1171.00" cy="839.07" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1171.00" cy="834.49" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="1171.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1171.00 1039.00)">T0031:mixed</text>
+<line x1="1217.00" y1="835.83" x2="1217.00" y2="833.67" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1217.00" cy="835.83" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1217.00" cy="833.67" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="1217.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1217.00 1039.00)">T0036:mixed</text>
+<line x1="1263.00" y1="832.59" x2="1263.00" y2="839.26" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1263.00" cy="832.59" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1263.00" cy="839.26" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="1263.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1263.00 1039.00)">T0041:mixed</text>
+<line x1="1309.00" y1="822.87" x2="1309.00" y2="830.00" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1309.00" cy="822.87" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1309.00" cy="830.00" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="1309.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1309.00 1039.00)">T0021:mixed</text>
+<line x1="1355.00" y1="822.87" x2="1355.00" y2="834.07" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1355.00" cy="822.87" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1355.00" cy="834.07" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="1355.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1355.00 1039.00)">T0023:mixed</text>
+<line x1="1401.00" y1="822.87" x2="1401.00" y2="935.81" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1401.00" cy="822.87" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1401.00" cy="935.81" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="1401.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1401.00 1039.00)">T0025:mixed</text>
+<line x1="1447.00" y1="822.87" x2="1447.00" y2="919.95" stroke="#94a3b8" stroke-width="1.2"/>
+<circle cx="1447.00" cy="822.87" r="4.30" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<circle cx="1447.00" cy="919.95" r="5.00" fill="#d64545" stroke="#263238" stroke-width="1.0"/>
+<text x="1447.00" y="1039.00" class="small" text-anchor="end" transform="rotate(-55 1447.00 1039.00)">T0027:mixed</text>
+<circle cx="1340.00" cy="762.00" r="4.20" fill="#ffffff" stroke="#111827" stroke-width="1.4"/>
+<text x="1350.00" y="766.00" class="small" text-anchor="start">cmd</text>
+<circle cx="1392.00" cy="762.00" r="5.00" fill="#b7791f" stroke="#263238" stroke-width="1.0"/>
+<text x="1402.00" y="766.00" class="small" text-anchor="start">actual</text>
+</svg>

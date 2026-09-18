@@ -1,0 +1,346 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="950" viewBox="0 0 1500 950">
+<style>
+text{font-family:Arial,Helvetica,sans-serif;fill:#1f2933}
+.title{font-size:20px;font-weight:700}
+.subtitle{font-size:12px;fill:#52606d}
+.axis{stroke:#52606d;stroke-width:1}
+.grid{stroke:#d9e2ec;stroke-width:1}
+.ideal{stroke:#7b8794;stroke-width:1.5;stroke-dasharray:5 5}
+.label{font-size:11px;fill:#334e68}
+.small{font-size:9px;fill:#52606d}
+</style>
+<text x="28.00" y="34.00" class="title" text-anchor="start">Velocity command vs actual mean per trial</text>
+<text x="28.00" y="56.00" class="subtitle" text-anchor="start">Dashed line is perfect tracking. Red points are failed trials. Labels are trial IDs.</text>
+<circle cx="1130.00" cy="32.00" r="5.00" fill="#2b6cb0" stroke="#263238" stroke-width="1.5"/>
+<text x="1142.00" y="36.00" class="small" text-anchor="start">completed</text>
+<circle cx="1230.00" cy="32.00" r="6.00" fill="#d64545" stroke="#7f1d1d" stroke-width="1.5"/>
+<text x="1244.00" y="36.00" class="small" text-anchor="start">failed</text>
+<text x="285.00" y="105.00" class="label" text-anchor="middle">Pure vx (m/s)</text>
+<line x1="127.74" y1="115.00" x2="127.74" y2="415.00" class="grid"/>
+<line x1="90.00" y1="385.97" x2="480.00" y2="385.97" class="grid"/>
+<text x="127.74" y="429.00" class="small" text-anchor="middle">-0.5</text>
+<text x="82.00" y="388.97" class="small" text-anchor="end">-0.5</text>
+<line x1="220.25" y1="115.00" x2="220.25" y2="415.00" class="grid"/>
+<line x1="90.00" y1="314.81" x2="480.00" y2="314.81" class="grid"/>
+<text x="220.25" y="429.00" class="small" text-anchor="middle">0</text>
+<text x="82.00" y="317.81" class="small" text-anchor="end">0</text>
+<line x1="312.75" y1="115.00" x2="312.75" y2="415.00" class="grid"/>
+<line x1="90.00" y1="243.65" x2="480.00" y2="243.65" class="grid"/>
+<text x="312.75" y="429.00" class="small" text-anchor="middle">0.5</text>
+<text x="82.00" y="246.65" class="small" text-anchor="end">0.5</text>
+<line x1="405.26" y1="115.00" x2="405.26" y2="415.00" class="grid"/>
+<line x1="90.00" y1="172.50" x2="480.00" y2="172.50" class="grid"/>
+<text x="405.26" y="429.00" class="small" text-anchor="middle">1.0</text>
+<text x="82.00" y="175.50" class="small" text-anchor="end">1.0</text>
+<line x1="497.76" y1="115.00" x2="497.76" y2="415.00" class="grid"/>
+<line x1="90.00" y1="101.34" x2="480.00" y2="101.34" class="grid"/>
+<text x="497.76" y="429.00" class="small" text-anchor="middle">1.5</text>
+<text x="82.00" y="104.34" class="small" text-anchor="end">1.5</text>
+<line x1="90.00" y1="415.00" x2="480.00" y2="415.00" class="axis"/>
+<line x1="90.00" y1="115.00" x2="90.00" y2="415.00" class="axis"/>
+<line x1="90.00" y1="415.00" x2="480.00" y2="115.00" class="ideal"/>
+<text x="285.00" y="446.00" class="small" text-anchor="middle">command</text>
+<text x="62.00" y="265.00" class="small" text-anchor="middle">actual</text>
+<circle cx="127.74" cy="370.34" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="134.74" y="365.34" class="small" text-anchor="start">T0002</text>
+<circle cx="173.99" cy="336.22" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="180.99" y="331.22" class="small" text-anchor="start">T0003</text>
+<circle cx="238.75" cy="306.84" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="245.75" y="301.84" class="small" text-anchor="start">T0004</text>
+<circle cx="294.25" cy="254.85" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="301.25" y="249.85" class="small" text-anchor="start">T0005</text>
+<circle cx="386.76" cy="250.32" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="393.76" y="245.32" class="small" text-anchor="start">T0006</text>
+<circle cx="442.26" cy="158.49" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="449.26" y="153.49" class="small" text-anchor="start">T0007</text>
+<text x="285.00" y="550.00" class="label" text-anchor="middle">Mixed vx (m/s)</text>
+<line x1="104.62" y1="560.00" x2="104.62" y2="860.00" class="grid"/>
+<line x1="90.00" y1="848.76" x2="480.00" y2="848.76" class="grid"/>
+<text x="104.62" y="874.00" class="small" text-anchor="middle">-0.5</text>
+<text x="82.00" y="851.76" class="small" text-anchor="end">-0.5</text>
+<line x1="220.25" y1="560.00" x2="220.25" y2="860.00" class="grid"/>
+<line x1="90.00" y1="759.81" x2="480.00" y2="759.81" class="grid"/>
+<text x="220.25" y="874.00" class="small" text-anchor="middle">0</text>
+<text x="82.00" y="762.81" class="small" text-anchor="end">0</text>
+<line x1="335.88" y1="560.00" x2="335.88" y2="860.00" class="grid"/>
+<line x1="90.00" y1="670.86" x2="480.00" y2="670.86" class="grid"/>
+<text x="335.88" y="874.00" class="small" text-anchor="middle">0.5</text>
+<text x="82.00" y="673.86" class="small" text-anchor="end">0.5</text>
+<line x1="451.51" y1="560.00" x2="451.51" y2="860.00" class="grid"/>
+<line x1="90.00" y1="581.92" x2="480.00" y2="581.92" class="grid"/>
+<text x="451.51" y="874.00" class="small" text-anchor="middle">1.0</text>
+<text x="82.00" y="584.92" class="small" text-anchor="end">1.0</text>
+<line x1="90.00" y1="860.00" x2="480.00" y2="860.00" class="axis"/>
+<line x1="90.00" y1="560.00" x2="90.00" y2="860.00" class="axis"/>
+<line x1="90.00" y1="860.00" x2="480.00" y2="560.00" class="ideal"/>
+<text x="285.00" y="891.00" class="small" text-anchor="middle">command</text>
+<text x="62.00" y="710.00" class="small" text-anchor="middle">actual</text>
+<circle cx="127.74" cy="783.79" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="134.74" y="778.79" class="small" text-anchor="start">T0020</text>
+<circle cx="127.74" cy="818.91" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="134.74" y="813.91" class="small" text-anchor="start">T0021</text>
+<circle cx="127.74" cy="826.02" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="134.74" y="821.02" class="small" text-anchor="start">T0022</text>
+<circle cx="127.74" cy="803.27" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="134.74" y="798.27" class="small" text-anchor="start">T0023</text>
+<circle cx="442.26" cy="681.38" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="449.26" y="676.38" class="small" text-anchor="start">T0024</text>
+<circle cx="442.26" cy="695.76" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="449.26" y="690.76" class="small" text-anchor="start">T0025</text>
+<circle cx="442.26" cy="613.07" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="449.26" y="608.07" class="small" text-anchor="start">T0026</text>
+<circle cx="442.26" cy="684.42" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="449.26" y="679.42" class="small" text-anchor="start">T0027</text>
+<circle cx="285.00" cy="715.08" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="292.00" y="710.08" class="small" text-anchor="start">T0028</text>
+<circle cx="206.37" cy="760.81" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="213.37" y="755.81" class="small" text-anchor="start">T0029</text>
+<circle cx="363.63" cy="644.43" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="370.63" y="639.43" class="small" text-anchor="start">T0030</text>
+<circle cx="167.06" cy="790.71" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="174.06" y="785.71" class="small" text-anchor="start">T0031</text>
+<circle cx="324.31" cy="678.85" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="331.31" y="673.85" class="small" text-anchor="start">T0032</text>
+<circle cx="245.69" cy="745.89" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="252.69" y="740.89" class="small" text-anchor="start">T0033</text>
+<circle cx="402.94" cy="673.23" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="409.94" y="668.23" class="small" text-anchor="start">T0034</text>
+<circle cx="147.40" cy="800.42" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="154.40" y="795.42" class="small" text-anchor="start">T0035</text>
+<circle cx="304.66" cy="690.12" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="311.66" y="685.12" class="small" text-anchor="start">T0036</text>
+<circle cx="226.03" cy="755.32" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="233.03" y="750.32" class="small" text-anchor="start">T0037</text>
+<circle cx="383.29" cy="642.55" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="390.29" y="637.55" class="small" text-anchor="start">T0038</text>
+<circle cx="186.71" cy="768.91" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="193.71" y="763.91" class="small" text-anchor="start">T0039</text>
+<circle cx="343.97" cy="659.22" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="350.97" y="654.22" class="small" text-anchor="start">T0040</text>
+<circle cx="265.34" cy="713.10" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="272.34" y="708.10" class="small" text-anchor="start">T0041</text>
+<circle cx="422.60" cy="667.18" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="429.60" y="662.18" class="small" text-anchor="start">T0042</text>
+<circle cx="137.57" cy="809.31" r="4.80" fill="#2b6cb0" stroke="#263238" stroke-width="1.2"/>
+<text x="144.57" y="804.31" class="small" text-anchor="start">T0043</text>
+<text x="765.00" y="105.00" class="label" text-anchor="middle">Pure vy (m/s)</text>
+<line x1="666.71" y1="115.00" x2="666.71" y2="415.00" class="grid"/>
+<line x1="570.00" y1="340.60" x2="960.00" y2="340.60" class="grid"/>
+<text x="666.71" y="429.00" class="small" text-anchor="middle">-0.25</text>
+<text x="562.00" y="343.60" class="small" text-anchor="end">-0.25</text>
+<line x1="765.00" y1="115.00" x2="765.00" y2="415.00" class="grid"/>
+<line x1="570.00" y1="265.00" x2="960.00" y2="265.00" class="grid"/>
+<text x="765.00" y="429.00" class="small" text-anchor="middle">0</text>
+<text x="562.00" y="268.00" class="small" text-anchor="end">0</text>
+<line x1="863.29" y1="115.00" x2="863.29" y2="415.00" class="grid"/>
+<line x1="570.00" y1="189.40" x2="960.00" y2="189.40" class="grid"/>
+<text x="863.29" y="429.00" class="small" text-anchor="middle">0.25</text>
+<text x="562.00" y="192.40" class="small" text-anchor="end">0.25</text>
+<line x1="961.57" y1="115.00" x2="961.57" y2="415.00" class="grid"/>
+<line x1="570.00" y1="113.79" x2="960.00" y2="113.79" class="grid"/>
+<text x="961.57" y="429.00" class="small" text-anchor="middle">0.5</text>
+<text x="562.00" y="116.79" class="small" text-anchor="end">0.5</text>
+<line x1="570.00" y1="415.00" x2="960.00" y2="415.00" class="axis"/>
+<line x1="570.00" y1="115.00" x2="570.00" y2="415.00" class="axis"/>
+<line x1="570.00" y1="415.00" x2="960.00" y2="115.00" class="ideal"/>
+<text x="765.00" y="446.00" class="small" text-anchor="middle">command</text>
+<text x="542.00" y="265.00" class="small" text-anchor="middle">actual</text>
+<circle cx="607.74" cy="368.65" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="614.74" y="363.65" class="small" text-anchor="start">T0008</text>
+<circle cx="686.37" cy="294.86" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="693.37" y="289.86" class="small" text-anchor="start">T0009</text>
+<circle cx="725.69" cy="280.35" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="732.69" y="275.35" class="small" text-anchor="start">T0010</text>
+<circle cx="804.31" cy="252.86" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="811.31" y="247.86" class="small" text-anchor="start">T0011</text>
+<circle cx="843.63" cy="232.60" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="850.63" y="227.60" class="small" text-anchor="start">T0012</text>
+<circle cx="922.26" cy="167.85" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="929.26" y="162.85" class="small" text-anchor="start">T0013</text>
+<text x="765.00" y="550.00" class="label" text-anchor="middle">Mixed vy (m/s)</text>
+<line x1="636.26" y1="560.00" x2="636.26" y2="860.00" class="grid"/>
+<line x1="570.00" y1="809.03" x2="960.00" y2="809.03" class="grid"/>
+<text x="636.26" y="874.00" class="small" text-anchor="middle">-0.25</text>
+<text x="562.00" y="812.03" class="small" text-anchor="end">-0.25</text>
+<line x1="738.10" y1="560.00" x2="738.10" y2="860.00" class="grid"/>
+<line x1="570.00" y1="730.69" x2="960.00" y2="730.69" class="grid"/>
+<text x="738.10" y="874.00" class="small" text-anchor="middle">0</text>
+<text x="562.00" y="733.69" class="small" text-anchor="end">0</text>
+<line x1="839.94" y1="560.00" x2="839.94" y2="860.00" class="grid"/>
+<line x1="570.00" y1="652.36" x2="960.00" y2="652.36" class="grid"/>
+<text x="839.94" y="874.00" class="small" text-anchor="middle">0.25</text>
+<text x="562.00" y="655.36" class="small" text-anchor="end">0.25</text>
+<line x1="941.78" y1="560.00" x2="941.78" y2="860.00" class="grid"/>
+<line x1="570.00" y1="574.02" x2="960.00" y2="574.02" class="grid"/>
+<text x="941.78" y="874.00" class="small" text-anchor="middle">0.5</text>
+<text x="562.00" y="577.02" class="small" text-anchor="end">0.5</text>
+<line x1="570.00" y1="860.00" x2="960.00" y2="860.00" class="axis"/>
+<line x1="570.00" y1="560.00" x2="570.00" y2="860.00" class="axis"/>
+<line x1="570.00" y1="860.00" x2="960.00" y2="560.00" class="ideal"/>
+<text x="765.00" y="891.00" class="small" text-anchor="middle">command</text>
+<text x="542.00" y="710.00" class="small" text-anchor="middle">actual</text>
+<circle cx="607.74" cy="791.13" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="614.74" y="786.13" class="small" text-anchor="start">T0020</text>
+<circle cx="607.74" cy="807.58" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="614.74" y="802.58" class="small" text-anchor="start">T0021</text>
+<circle cx="868.45" cy="618.30" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="875.45" y="613.30" class="small" text-anchor="start">T0022</text>
+<circle cx="868.45" cy="612.24" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="875.45" y="607.24" class="small" text-anchor="start">T0023</text>
+<circle cx="607.74" cy="790.94" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="614.74" y="785.94" class="small" text-anchor="start">T0024</text>
+<circle cx="607.74" cy="748.16" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="614.74" y="743.16" class="small" text-anchor="start">T0025</text>
+<circle cx="868.45" cy="589.03" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="875.45" y="584.03" class="small" text-anchor="start">T0026</text>
+<circle cx="868.45" cy="725.82" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="875.45" y="720.82" class="small" text-anchor="start">T0027</text>
+<circle cx="694.65" cy="796.60" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="701.65" y="791.60" class="small" text-anchor="start">T0028</text>
+<circle cx="781.55" cy="705.93" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="788.55" y="700.93" class="small" text-anchor="start">T0029</text>
+<circle cx="636.71" cy="771.30" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="643.71" y="766.30" class="small" text-anchor="start">T0030</text>
+<circle cx="723.61" cy="735.29" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="730.61" y="730.29" class="small" text-anchor="start">T0031</text>
+<circle cx="810.52" cy="684.10" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="817.52" y="679.10" class="small" text-anchor="start">T0032</text>
+<circle cx="665.68" cy="774.18" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="672.68" y="769.18" class="small" text-anchor="start">T0033</text>
+<circle cx="752.58" cy="754.29" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="759.58" y="749.29" class="small" text-anchor="start">T0034</text>
+<circle cx="839.48" cy="647.29" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="846.48" y="642.29" class="small" text-anchor="start">T0035</text>
+<circle cx="617.40" cy="796.45" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="624.40" y="791.45" class="small" text-anchor="start">T0036</text>
+<circle cx="704.30" cy="742.78" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="711.30" y="737.78" class="small" text-anchor="start">T0037</text>
+<circle cx="791.20" cy="677.28" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="798.20" y="672.28" class="small" text-anchor="start">T0038</text>
+<circle cx="646.37" cy="791.70" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="653.37" y="786.70" class="small" text-anchor="start">T0039</text>
+<circle cx="733.27" cy="721.29" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="740.27" y="716.29" class="small" text-anchor="start">T0040</text>
+<circle cx="820.17" cy="669.93" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="827.17" y="664.93" class="small" text-anchor="start">T0041</text>
+<circle cx="675.33" cy="786.76" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="682.33" y="781.76" class="small" text-anchor="start">T0042</text>
+<circle cx="762.24" cy="708.41" r="4.80" fill="#2f855a" stroke="#263238" stroke-width="1.2"/>
+<text x="769.24" y="703.41" class="small" text-anchor="start">T0043</text>
+<text x="1245.00" y="105.00" class="label" text-anchor="middle">Pure yaw (rad/s)</text>
+<line x1="1102.52" y1="115.00" x2="1102.52" y2="415.00" class="grid"/>
+<line x1="1050.00" y1="374.60" x2="1440.00" y2="374.60" class="grid"/>
+<text x="1102.52" y="429.00" class="small" text-anchor="middle">-0.5</text>
+<text x="1042.00" y="377.60" class="small" text-anchor="end">-0.5</text>
+<line x1="1177.46" y1="115.00" x2="1177.46" y2="415.00" class="grid"/>
+<line x1="1050.00" y1="316.96" x2="1440.00" y2="316.96" class="grid"/>
+<text x="1177.46" y="429.00" class="small" text-anchor="middle">-0.25</text>
+<text x="1042.00" y="319.96" class="small" text-anchor="end">-0.25</text>
+<line x1="1252.39" y1="115.00" x2="1252.39" y2="415.00" class="grid"/>
+<line x1="1050.00" y1="259.32" x2="1440.00" y2="259.32" class="grid"/>
+<text x="1252.39" y="429.00" class="small" text-anchor="middle">0</text>
+<text x="1042.00" y="262.32" class="small" text-anchor="end">0</text>
+<line x1="1327.32" y1="115.00" x2="1327.32" y2="415.00" class="grid"/>
+<line x1="1050.00" y1="201.67" x2="1440.00" y2="201.67" class="grid"/>
+<text x="1327.32" y="429.00" class="small" text-anchor="middle">0.25</text>
+<text x="1042.00" y="204.67" class="small" text-anchor="end">0.25</text>
+<line x1="1402.26" y1="115.00" x2="1402.26" y2="415.00" class="grid"/>
+<line x1="1050.00" y1="144.03" x2="1440.00" y2="144.03" class="grid"/>
+<text x="1402.26" y="429.00" class="small" text-anchor="middle">0.5</text>
+<text x="1042.00" y="147.03" class="small" text-anchor="end">0.5</text>
+<line x1="1477.19" y1="115.00" x2="1477.19" y2="415.00" class="grid"/>
+<line x1="1050.00" y1="86.39" x2="1440.00" y2="86.39" class="grid"/>
+<text x="1477.19" y="429.00" class="small" text-anchor="middle">0.75</text>
+<text x="1042.00" y="89.39" class="small" text-anchor="end">0.75</text>
+<line x1="1050.00" y1="415.00" x2="1440.00" y2="415.00" class="axis"/>
+<line x1="1050.00" y1="115.00" x2="1050.00" y2="415.00" class="axis"/>
+<line x1="1050.00" y1="415.00" x2="1440.00" y2="115.00" class="ideal"/>
+<text x="1245.00" y="446.00" class="small" text-anchor="middle">command</text>
+<text x="1022.00" y="265.00" class="small" text-anchor="middle">actual</text>
+<circle cx="1102.52" cy="385.97" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1109.52" y="380.97" class="small" text-anchor="start">T0014</text>
+<circle cx="1177.46" cy="301.66" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1184.46" y="296.66" class="small" text-anchor="start">T0015</text>
+<circle cx="1222.42" cy="336.93" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="1229.42" y="331.93" class="small" text-anchor="start">T0016</text>
+<circle cx="1282.36" cy="242.22" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1289.36" y="237.22" class="small" text-anchor="start">T0017</text>
+<circle cx="1327.32" cy="229.79" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1334.32" y="224.79" class="small" text-anchor="start">T0018</text>
+<circle cx="1402.26" cy="152.00" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1409.26" y="147.00" class="small" text-anchor="start">T0019</text>
+<text x="1245.00" y="550.00" class="label" text-anchor="middle">Mixed yaw (rad/s)</text>
+<line x1="1064.91" y1="560.00" x2="1064.91" y2="860.00" class="grid"/>
+<line x1="1050.00" y1="848.53" x2="1440.00" y2="848.53" class="grid"/>
+<text x="1064.91" y="874.00" class="small" text-anchor="middle">-1.5</text>
+<text x="1042.00" y="851.53" class="small" text-anchor="end">-1.5</text>
+<line x1="1153.69" y1="560.00" x2="1153.69" y2="860.00" class="grid"/>
+<line x1="1050.00" y1="780.24" x2="1440.00" y2="780.24" class="grid"/>
+<text x="1153.69" y="874.00" class="small" text-anchor="middle">-1.0</text>
+<text x="1042.00" y="783.24" class="small" text-anchor="end">-1.0</text>
+<line x1="1242.46" y1="560.00" x2="1242.46" y2="860.00" class="grid"/>
+<line x1="1050.00" y1="711.95" x2="1440.00" y2="711.95" class="grid"/>
+<text x="1242.46" y="874.00" class="small" text-anchor="middle">-0.5</text>
+<text x="1042.00" y="714.95" class="small" text-anchor="end">-0.5</text>
+<line x1="1331.24" y1="560.00" x2="1331.24" y2="860.00" class="grid"/>
+<line x1="1050.00" y1="643.66" x2="1440.00" y2="643.66" class="grid"/>
+<text x="1331.24" y="874.00" class="small" text-anchor="middle">0</text>
+<text x="1042.00" y="646.66" class="small" text-anchor="end">0</text>
+<line x1="1420.01" y1="560.00" x2="1420.01" y2="860.00" class="grid"/>
+<line x1="1050.00" y1="575.37" x2="1440.00" y2="575.37" class="grid"/>
+<text x="1420.01" y="874.00" class="small" text-anchor="middle">0.5</text>
+<text x="1042.00" y="578.37" class="small" text-anchor="end">0.5</text>
+<line x1="1050.00" y1="860.00" x2="1440.00" y2="860.00" class="axis"/>
+<line x1="1050.00" y1="560.00" x2="1050.00" y2="860.00" class="axis"/>
+<line x1="1050.00" y1="860.00" x2="1440.00" y2="560.00" class="ideal"/>
+<text x="1245.00" y="891.00" class="small" text-anchor="middle">command</text>
+<text x="1022.00" y="710.00" class="small" text-anchor="middle">actual</text>
+<circle cx="1260.22" cy="696.41" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="1267.22" y="691.41" class="small" text-anchor="start">T0020</text>
+<circle cx="1402.26" cy="598.66" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1409.26" y="593.66" class="small" text-anchor="start">T0021</text>
+<circle cx="1260.22" cy="700.40" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1267.22" y="695.40" class="small" text-anchor="start">T0022</text>
+<circle cx="1402.26" cy="604.14" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1409.26" y="599.14" class="small" text-anchor="start">T0023</text>
+<circle cx="1260.22" cy="830.97" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="1267.22" y="825.97" class="small" text-anchor="start">T0024</text>
+<circle cx="1402.26" cy="741.35" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="1409.26" y="736.35" class="small" text-anchor="start">T0025</text>
+<circle cx="1260.22" cy="719.75" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1267.22" y="714.75" class="small" text-anchor="start">T0026</text>
+<circle cx="1402.26" cy="719.96" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="1409.26" y="714.96" class="small" text-anchor="start">T0027</text>
+<circle cx="1288.63" cy="703.58" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="1295.63" y="698.58" class="small" text-anchor="start">T0028</text>
+<circle cx="1317.03" cy="648.68" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1324.03" y="643.68" class="small" text-anchor="start">T0029</text>
+<circle cx="1345.44" cy="623.13" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1352.44" y="618.13" class="small" text-anchor="start">T0030</text>
+<circle cx="1373.85" cy="604.71" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1380.85" y="599.71" class="small" text-anchor="start">T0031</text>
+<circle cx="1265.90" cy="702.53" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1272.90" y="697.53" class="small" text-anchor="start">T0032</text>
+<circle cx="1294.31" cy="668.85" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1301.31" y="663.85" class="small" text-anchor="start">T0033</text>
+<circle cx="1322.72" cy="737.25" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="1329.72" y="732.25" class="small" text-anchor="start">T0034</text>
+<circle cx="1351.12" cy="634.22" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1358.12" y="629.22" class="small" text-anchor="start">T0035</text>
+<circle cx="1379.53" cy="603.60" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1386.53" y="598.60" class="small" text-anchor="start">T0036</text>
+<circle cx="1271.58" cy="668.82" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1278.58" y="663.82" class="small" text-anchor="start">T0037</text>
+<circle cx="1299.99" cy="674.67" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1306.99" y="669.67" class="small" text-anchor="start">T0038</text>
+<circle cx="1328.40" cy="636.05" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1335.40" y="631.05" class="small" text-anchor="start">T0039</text>
+<circle cx="1356.81" cy="626.92" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1363.81" y="621.92" class="small" text-anchor="start">T0040</text>
+<circle cx="1385.21" cy="611.14" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1392.21" y="606.14" class="small" text-anchor="start">T0041</text>
+<circle cx="1277.26" cy="751.69" r="5.80" fill="#d64545" stroke="#7f1d1d" stroke-width="1.2"/>
+<text x="1284.26" y="746.69" class="small" text-anchor="start">T0042</text>
+<circle cx="1305.67" cy="667.14" r="4.80" fill="#b7791f" stroke="#263238" stroke-width="1.2"/>
+<text x="1312.67" y="662.14" class="small" text-anchor="start">T0043</text>
+</svg>

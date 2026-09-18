@@ -24,10 +24,10 @@ class G1Cfg(CarryBoxCfg):
         curriculum = False
         resampling_time = 0.0
         resample_carry_commands = True
-        carry_command_mode_probabilities = [0.10, 0.25, 0.15, 0.15, 0.35]
+        carry_command_mode_probabilities = [0.10, 0.15, 0.10, 0.15, 0.50]
         carry_vx_range = [-0.5, 1.2]
         carry_vy_range = [-0.4, 0.4]
-        carry_yaw_rate_range = [-0.5, 0.5]
+        carry_yaw_rate_range = [-0.6, 0.6]
         carry_mixed_ranges = [
             [-0.4, 0.96],
             [-0.32, 0.32],
@@ -43,13 +43,13 @@ class G1Cfg(CarryBoxCfg):
         class ranges:
             lin_vel_x = [-0.5, 1.2]
             lin_vel_y = [-0.4, 0.4]
-            ang_vel_yaw = [-0.5, 0.5]
+            ang_vel_yaw = [-0.6, 0.6]
             heading = [0.0, 0.0]
 
     class rewards(CarryBoxCfg.rewards):
         class scales:
             carry_lin_vel_tracking = 3.0
-            carry_yaw_vel_tracking = 2.5
+            carry_yaw_vel_tracking = 3.0
 
             carry_bilateral_contact = 0.5
             carry_hand_box_surface = 1.5
