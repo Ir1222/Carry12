@@ -1,4 +1,6 @@
-"""Reproduce CarryWith statistics and the specialist's static calibration.
+"""Reproduce the historical CarryWith target-matching audit (offline only).
+
+For the current physical-constraint scale audit, use analyze_constraints instead.
 
 Run from the repository root:
     python -m experiments.carry_preservation.analyze
@@ -402,11 +404,13 @@ def write_summary(path, data, calibration, stats):
             "carry_hand_box_surface", "carry_arm_pose", "carry_relative_position", "carry_relative_orientation")]
         values += [v["motion_reward_50hz"]["mean"], v["surface_retargeted_grasp"]["mean"]]
         rows.append("| " + d["name"] + " | " + " | ".join("%.4f" % x for x in values) + " |")
-    text = """# Generated CarryWith reference summary
+    text = """# Historical CarryWith target-matching audit
+
+This is an offline historical audit. See REPORT.md and constraint_statistics.json for current physical constraints.
 
 Reproduce with `python -m experiments.carry_preservation.analyze` from the repository root.
 Full distributions, histograms, covariances and conditional correlations are in `statistics.json`.
-Source hashes and runtime parameters are in `legged_gym/resources/config/carry_preservation.json`.
+Source hashes and historical calibration parameters are in `legged_gym/resources/config/carry_preservation.json`.
 
 All three clips are used (773 frames at 60 Hz); differentiation never crosses clip boundaries.
 Root/base and pelvis are the same frame. Torso transforms are reconstructed using the current URDF.

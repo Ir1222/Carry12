@@ -1,3 +1,5 @@
+"""Historical calibration/oracle tests; these kernels are offline only."""
+
 import copy
 import json
 import math
@@ -17,7 +19,6 @@ from legged_gym.carry_preservation import (
     quat_rotate_inverse, quaternion_log,
 )
 from experiments.carry_preservation import analyze
-from experiments.carrybox_locomotion_eval.evaluation.metrics import PRESERVATION_METRICS
 
 
 def calibration(device="cpu", dtype=torch.float64):
@@ -180,7 +181,6 @@ class KernelTests(unittest.TestCase):
         self.assertTrue(math.isnan(a.pop(torch.tensor([0]))["carry/box_relative_motion_error_mps"].item()))
 
     def test_schema_and_calibration_validation(self):
-        self.assertEqual(PRESERVATION_METRICS, METRIC_NAMES)
         self.assertEqual(len(self.c.arm_joint_names), 14)
         self.assertTrue(all("waist" not in name and "hip" not in name for name in self.c.arm_joint_names))
         data = json.loads(analyze.DEFAULT_CALIBRATION.read_text())

@@ -1,4 +1,4 @@
-"""CPU regression against commit 7cb664d, without importing Isaac Gym.
+"""CPU semantic tests of the physical carry constraints, without Isaac Gym.
 
 Execute the real specialist methods and parent reward dispatch. Only simulator
 setup/reset is stubbed; quaternion operations use the project's TorchScript
@@ -7,9 +7,7 @@ Run: python -m unittest discover -s experiments/carry_preservation/tests -v
 """
 
 import ast
-import copy
 import importlib.util
-import json
 import math
 from pathlib import Path
 import subprocess
@@ -20,11 +18,14 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import torch
 
-from experiments.carry_preservation.tests.test_preservation import analyze, scene
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "legged_gym"))
+from legged_gym.carry_constraint_metrics import METRIC_NAMES, TEMPORAL_METRICS
+from experiments.carry_preservation import analyze
 
 
 ROOT = Path(__file__).resolve().parents[3]
-BASELINE = "7cb664d35c797de2fca84bb4e9d6cbf7db3825f0"
+BASELINE = "a070bb2"
 ENV_PATH = "legged_gym/legged_gym/envs/g1/carrybox_locomotion.py"
 CFG_PATH = "legged_gym/legged_gym/envs/g1/carrybox_locomotion_config.py"
 EVAL_PATH = "experiments/carrybox_locomotion_eval/envs/carrybox_locomotion_eval_env.py"
@@ -66,21 +67,21 @@ class SimulatorStub:
             sums[ids] = 0
 
 
+REWARDS = ("carry_hand_box_surface", "carry_hand_slip", "carry_arm_range",
+           "carry_relative_position", "carry_relative_velocity", "carry_bilateral_contact")
+
+
 class RuntimeRewardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.old = types.ModuleType("preservation_at_7cb664d")
-        exec(compile(old_source("legged_gym/legged_gym/carry_preservation.py"),
-                     "preservation_at_7cb664d.py", "exec"), cls.old.__dict__)
-        cls.calibration_data = json.loads(old_source("legged_gym/resources/config/carry_preservation.json"))
         cls.cfg, cls.ppo = load_config()
         spec = importlib.util.spec_from_file_location(
             "project_torch_utils", ROOT / "legged_gym/legged_gym/utils/torch_utils.py")
         cls.math_utils = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.math_utils)
         ns = dict(torch=torch, np=np, math=math, SimulatorStub=SimulatorStub,
-                  quat_mul=cls.math_utils.quat_mul, quat_conjugate=cls.math_utils.quat_conjugate,
-                  quat_rotate_inverse=cls.math_utils.quat_rotate_inverse)
+                  quat_rotate_inverse=cls.math_utils.quat_rotate_inverse,
+                  METRIC_NAMES=METRIC_NAMES, TEMPORAL_METRICS=TEMPORAL_METRICS)
         parent_path = ROOT / "legged_gym/legged_gym/envs/g1/carrybox.py"
         parent = next(n for n in ast.parse(parent_path.read_text()).body if isinstance(n, ast.ClassDef))
         parent.bases = [ast.Name(id="SimulatorStub", ctx=ast.Load())]
@@ -91,29 +92,18 @@ class RuntimeRewardTests(unittest.TestCase):
         ns["CarryBoxBase"] = ns["LeggedRobot"]
         definitions((ROOT / ENV_PATH).read_text(), ENV_PATH, ns)
         cls.env_type = ns["LeggedRobot"]
-        cls.runtime_log = staticmethod(ns["quaternion_log"])
-        cls.parent_type = ns["CarryBoxBase"]
-        ns.update(carrybox_locomotion=types.SimpleNamespace(LeggedRobot=cls.env_type),
-                  LEGGED_GYM_ROOT_DIR=str(ROOT / "legged_gym"),
-                  CarryCalibration=cls.old.CarryCalibration,
-                  compute_preservation=cls.old.compute_preservation)
+        ns["carrybox_locomotion"] = types.SimpleNamespace(LeggedRobot=cls.env_type)
         definitions((ROOT / EVAL_PATH).read_text(), EVAL_PATH, ns)
         cls.eval_type = ns["CarryBoxLocomotionEvalEnv"]
-        cls.max_errors = {name: 0.0 for name in cls.old.REWARD_NAMES}
+        cls.kernel = staticmethod(ns["constraint_reward"])
+        cls.violation = staticmethod(ns["range_violation"])
 
-    @classmethod
-    def tearDownClass(cls):
-        print("\nMaximum float32 absolute reward differences vs " + BASELINE + ":")
-        for name, value in cls.max_errors.items():
-            print(f"  {name}: {value:.9g}")
-
-    def make_env(self, state, evaluation=False):
+    def make_env(self, n=1, evaluation=False, dtype=torch.float32):
         env = (self.eval_type if evaluation else self.env_type)()
-        n = state["box_pos"].shape[0]
-        env.num_envs, env.device, env.dt = n, "cpu", state["dt"]
+        env.num_envs, env.device, env.dt = n, "cpu", 0.02
         env.cfg = types.SimpleNamespace(rewards=self.cfg.rewards)
-        env.dof_names = ["unused_%d" % i for i in range(15)] + list(self.calibration_data["arm_joint_names"])
-        env.dof_pos = state["arm_pos"].new_zeros(n, 29)
+        env.dof_names = ["unused_%d" % i for i in range(15)] + list(self.cfg.rewards.carry_arm_joint_names)
+        env.dof_pos = torch.zeros(n, 29, dtype=dtype)
         env.gym = types.SimpleNamespace(find_actor_rigid_body_handle=lambda e, a, name:
             {"torso_link": 1, "left_palm_link": 2, "right_palm_link": 3}[name])
         env.envs, env.actor_handles = [0], [0]
@@ -121,9 +111,15 @@ class RuntimeRewardTests(unittest.TestCase):
         env._init_buffers()
         env.rigid_body_states = env.dof_pos.new_zeros(n, 4, 13)
         env.box_states = env.dof_pos.new_zeros(n, 13)
-        self.set_state(env, state)
-        env.carry_previous_relative_pos.copy_(state["previous_relative_pos"])
-        env.carry_history_valid.copy_(state["history_valid"])
+        env.rigid_body_states[..., 6] = 1
+        env.box_states[:, 6] = 1
+        env._box_size = env.dof_pos.new_tensor([.35, .35, .30]).repeat(n, 1)
+        env.dof_pos[:, env.carry_arm_indices] = (env.carry_arm_range_lower + env.carry_arm_range_upper) / 2
+        env.box_states[:, :3] = env.dof_pos.new_tensor([.35, 0, .05])
+        env.rigid_body_states[:, 2:4, :3] = env.box_states[:, None, :3]
+        env.rigid_body_states[:, 2, 1] += .175
+        env.rigid_body_states[:, 3, 1] -= .175
+        env.hand_contact_filt = torch.ones(n, 2, dtype=torch.bool)
         env.extras = {"episode": {"stale": 1}}
         env.carry_policy_commands = env.commands = env.dof_pos.new_zeros(n, 3)
         env.obs_buf = env.dof_pos.new_zeros(n, 6)
@@ -131,67 +127,204 @@ class RuntimeRewardTests(unittest.TestCase):
             setattr(env, name, torch.zeros(n, dtype=torch.bool))
         env.carry_command_resample_time[:] = 1
         env.episode_length_buf = torch.arange(n) + 50
-        env.reward_scales = {name: getattr(self.cfg.rewards.scales, name) for name in self.old.REWARD_NAMES}
+        env.reward_scales = {name: getattr(self.cfg.rewards.scales, name) for name in REWARDS}
         env.rew_buf = env.dof_pos.new_zeros(n)
         env._prepare_reward_function()
-        env.last_rewards = {}
-
-        def record(name, function):
-            def reward():
-                result = function()
-                env.last_rewards[name] = result.clone()
-                return result
-            return reward
-
-        env.reward_functions = [record(name, fn) for name, fn in zip(env.reward_names, env.reward_functions)]
         return env
 
-    @staticmethod
-    def set_state(env, s):
-        env.rigid_body_states[:, 1, :3] = s["torso_pos"]
-        env.rigid_body_states[:, 1, 3:7] = s["torso_quat"]
-        env.rigid_body_states[:, 2:4, :3] = s["hand_pos"]
-        env.box_states[:, :3], env.box_states[:, 3:7] = s["box_pos"], s["box_quat"]
-        env.dof_pos[:, env.carry_arm_indices] = s["arm_pos"]
-        env._box_size = s["box_size"]
-
-    def assert_equivalent(self, state, env=None):
-        c = self.old.CarryCalibration(self.calibration_data, dtype=state["arm_pos"].dtype)
-        expected, metrics, relative = self.old.compute_preservation(calibration=c, **state)
-        env = env or self.make_env(state)
+    def step(self, env):
         env._post_physics_step_callback()
         env.compute_reward()
-        for name, reward in expected.items():
-            actual = env.last_rewards[name]
-            torch.testing.assert_close(actual, reward, atol=2e-5, rtol=2e-5)
-            self.assertTrue(bool(torch.isfinite(actual).all()))
-            if actual.dtype == torch.float32:
-                self.max_errors[name] = max(self.max_errors[name], (actual - reward).abs().max().item())
-        torch.testing.assert_close(env.rew_buf, sum(expected[n] * env.reward_scales[n] for n in expected),
-                                   atol=2e-6, rtol=2e-5)
-        torch.testing.assert_close(env.carry_previous_relative_pos, relative, atol=1e-6, rtol=2e-5)
-        self.assertTrue(bool(env.carry_history_valid.all()))
-        return env, metrics
+        rewards = {name: getattr(env, "_reward_" + name)().clone() for name in REWARDS}
+        for value in rewards.values():
+            self.assertEqual(value.shape, (env.num_envs,))
+            self.assertTrue(bool(torch.isfinite(value).all()))
+            self.assertTrue(bool(((value >= 0) & (value <= 1)).all()))
+        torch.testing.assert_close(env.rew_buf,
+            sum(rewards[name] * scale for name, scale in env.reward_scales.items()))
+        return rewards
 
-    def test_exact_constants_scales_and_unrelated_configuration(self):
-        r, data = self.cfg.rewards, self.calibration_data
-        mapping = {
-            "carry_reference_policy_dt": "policy_dt", "carry_torso_link": "torso_link",
-            "carry_hand_links": "hand_links", "carry_arm_joint_names": "arm_joint_names",
-            "carry_hand_normal_sigma": "hand_normal_sigma", "carry_hand_direction_sigma": "hand_direction_sigma",
-            "carry_arm_target": "arm_target", "carry_arm_sigma": "arm_sigma",
-            "carry_box_relative_position_target": "position_target", "carry_box_relative_position_sigma": "position_sigma",
-            "carry_box_relative_orientation_target": "orientation_target_xyzw",
-            "carry_box_relative_orientation_sigma": "orientation_sigma", "carry_box_relative_velocity_sigma": "motion_sigma",
-        }
-        for field, key in mapping.items():
-            self.assertEqual(getattr(r, field), data[key], field)
-        self.assertEqual([r.carry_hand_direction_left, r.carry_hand_direction_right], data["hand_directions"])
-        self.assertEqual(json.loads(analyze.DEFAULT_CALIBRATION.read_text()), data)
-        old_cfg, _ = load_config(old_source(CFG_PATH))
-        self.assertEqual({k: v for k, v in vars(r.scales).items() if not k.startswith("_")},
-                         {k: v for k, v in vars(old_cfg.rewards.scales).items() if not k.startswith("_")})
-        # Changes to commands, observations, PPO, etc. are outside this refactor.
+    def test_valid_region_is_flat_and_temporal_first_sample_excluded(self):
+        env = self.make_env(8)
+        rewards = self.step(env)
+        for name in REWARDS:
+            expected = 0 if name in ("carry_hand_slip", "carry_relative_velocity") else 1
+            torch.testing.assert_close(rewards[name], torch.full_like(rewards[name], expected))
+        for reward in self.step(env).values():
+            torch.testing.assert_close(reward, torch.ones_like(reward))
+        # Static state at another point within the region has exactly the same reward.
+        env.box_states[:, :3] += torch.tensor([.08, -.10, .08])
+        env.rigid_body_states[:, 2:4, :3] += torch.tensor([.08, -.10, .08])
+        env.rigid_body_states[:, 2:4, 0] += .10
+        env.dof_pos[:, env.carry_arm_indices] += .1
+        self.step(env)
+        for reward in self.step(env).values():
+            torch.testing.assert_close(reward, torch.ones_like(reward))
+        # Zero gradients inside, continuous first derivative at a boundary.
+        x = torch.tensor([[.2], [1.0], [1.001]], requires_grad=True)
+        self.kernel(self.violation(x, -1., 1.)).sum().backward()
+        torch.testing.assert_close(x.grad[:2], torch.zeros_like(x.grad[:2]))
+        self.assertLess(abs(x.grad[2].item()), .003)
+
+    def test_bad_states_increase_violation_and_reduce_reward(self):
+        cases = (
+            ("side", "carry_hand_box_surface", "left_hand_side_violation_m"),
+            ("edge", "carry_hand_box_surface", "left_hand_face_violation_m"),
+            ("slip", "carry_hand_slip", "left_hand_slip_violation_mps"),
+            ("arm", "carry_arm_range", "arm_range_violation_rad"),
+            ("position", "carry_relative_position", "box_relative_region_violation_m"),
+            ("velocity", "carry_relative_velocity", "box_relative_velocity_violation_mps"),
+        )
+        for mode, reward_name, metric in cases:
+            rewards, violations = [], []
+            for excess in (0., .05, .15, .35):
+                env = self.make_env()
+                self.step(env)
+                if mode == "side":
+                    env.rigid_body_states[:, 2, 1] -= .03 + excess
+                elif mode == "edge":
+                    env.rigid_body_states[:, 2, 0] += .185 + excess
+                elif mode == "slip":
+                    env.rigid_body_states[:, 2, 0] += (.35 + excess * 10) * env.dt
+                elif mode == "arm":
+                    env.dof_pos[:, env.carry_arm_indices[0]] = env.carry_arm_range_upper[0] + excess
+                elif mode == "position":
+                    env.box_states[:, 0] = env.carry_box_relative_position_upper[0] + excess
+                else:
+                    env.box_states[:, 0] += (.35 + excess * 10) * env.dt
+                rewards.append(self.step(env)[reward_name].item())
+                violations.append(env.carry_metrics[metric].item())
+            self.assertTrue(all(a > b for a, b in zip(rewards, rewards[1:])), (mode, rewards))
+            self.assertTrue(all(a < b for a, b in zip(violations, violations[1:])), (mode, violations))
+        env = self.make_env(3)
+        env.rigid_body_states[0, 2:4, :3] = env.rigid_body_states[0, [3, 2], :3]
+        env.rigid_body_states[1, 3, :3] = env.rigid_body_states[1, 2, :3]
+        env.rigid_body_states[2, 2, :3] = env.box_states[2, :3]
+        self.assertTrue(bool((self.step(env)["carry_hand_box_surface"] < .1).all()))
+
+    def test_all_box_size_corners_and_arm_scope(self):
+        # Includes asymmetric dimensions beyond the configured mixture.
+        sizes = torch.cartesian_prod(torch.tensor([.20, .60]), torch.tensor([.20, .60]), torch.tensor([.20, .50]))
+        env = self.make_env(len(sizes))
+        env._box_size = sizes
+        env.rigid_body_states[:, 2, 1] = sizes[:, 1] / 2
+        env.rigid_body_states[:, 3, 1] = -sizes[:, 1] / 2
+        env.rigid_body_states[:, 2:4, 0] += sizes[:, None, 0] / 2 - .01
+        env.dof_pos[:, :15] = 100  # No waist/leg coupling in arm guardrail.
+        rewards = self.step(env)
+        torch.testing.assert_close(rewards["carry_hand_box_surface"], torch.ones(len(sizes)))
+        torch.testing.assert_close(rewards["carry_arm_range"], torch.ones(len(sizes)))
+
+    def test_rigid_translation_rotation_and_quaternion_signs(self):
+        env = self.make_env(5)
+        local_box = env.box_states[:, :3].clone()
+        local_palms = env.rigid_body_states[:, 2:4, :3].clone()
+        self.step(env)
+        for t in range(1, 16):
+            # Stand/vx/vy/yaw/mixed, including full 3D rigid-body rotations.
+            rotvec = np.array([[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, .1], [.04, -.03, .08]]) * t
+            q = torch.tensor(Rotation.from_rotvec(rotvec).as_quat(), dtype=torch.float32)
+            translation = torch.tensor([[0, 0, 0], [.02, 0, 0], [0, .02, 0], [0, 0, 0], [.02, -.01, .005]]) * t
+            env.rigid_body_states[:, 1, :3] = translation
+            env.rigid_body_states[:, 1, 3:7] = q
+            env.box_states[:, :3] = self.math_utils.quat_rotate(q, local_box) + translation
+            env.box_states[:, 3:7] = q * (-1 if t % 2 else 1)
+            env.rigid_body_states[:, 2:4, :3] = self.math_utils.quat_rotate(
+                q[:, None].expand(-1, 2, -1).reshape(-1, 4), local_palms.reshape(-1, 3)
+            ).reshape(-1, 2, 3) + translation[:, None]
+            rewards = self.step(env)
+            for name in ("carry_hand_slip", "carry_relative_velocity"):
+                torch.testing.assert_close(rewards[name], torch.ones_like(rewards[name]))
+            for name in ("left_hand_tangential_slip_mps", "right_hand_tangential_slip_mps", "box_relative_motion_error_mps"):
+                self.assertLess(env.carry_metrics[name].max().item(), 2e-5)
+
+    def test_partial_reset_terminal_metrics_and_evaluation(self):
+        env = self.make_env(3, evaluation=True)
+        self.step(env)
+        env.rigid_body_states[:, 2, 0] += .02
+        self.step(env)
+        expected = env.carry_metrics["left_hand_tangential_slip_mps"][0].clone()
+        previous = env.carry_previous_hand_box[1:].clone()
+        env.reset_idx(torch.tensor([0]))
+        torch.testing.assert_close(env.extras["episode"]["carry/left_hand_tangential_slip_mps"], expected)
+        torch.testing.assert_close(env.carry_previous_hand_box[1:], previous)
+        self.assertEqual(env.carry_motion_samples.tolist(), [0, 1, 1])
+        self.assertEqual(env.carry_history_valid.tolist(), [False, True, True])
+        # Stub reset moves bodies by 100 m. That must never become a velocity sample.
+        rewards = self.step(env)
+        self.assertNotIn("episode", env.extras)
+        self.assertEqual(env.carry_motion_metric_valid.tolist(), [False, True, True])
+        for name in ("carry_hand_slip", "carry_relative_velocity"):
+            self.assertEqual(rewards[name][0].item(), 0)
+        for name in TEMPORAL_METRICS:
+            self.assertEqual(env.carry_metrics[name][0].item(), 0)
+        env.reset_idx(torch.tensor([0]))
+        self.assertTrue(torch.isnan(env.extras["episode"]["carry/left_hand_tangential_slip_mps"]))
+        env.reset_idx(torch.tensor([], dtype=torch.long))
+
+    def test_disabled_rewards_still_update_history_and_diagnostics(self):
+        env = self.make_env()
+        env.reward_scales = {"carry_hand_box_surface": .03}
+        env._prepare_reward_function()
+        self.step(env)
+        env.rigid_body_states[:, 2, 0] += .02
+        self.step(env)
+        self.assertAlmostEqual(env.carry_metrics["left_hand_tangential_slip_mps"].item(), 1., places=5)
+        self.assertEqual(env.carry_motion_samples.item(), 1)
+        # Reward access is pure and never consumes a history sample.
+        for _ in range(3):
+            env._reward_carry_hand_slip()
+            env._reward_carry_relative_velocity()
+        self.assertEqual(env.carry_motion_samples.item(), 1)
+
+    def test_float32_batch_finite_independent(self):
+        torch.manual_seed(7)
+        env = self.make_env(4096)
+        env.box_states[:, :3] += torch.randn(4096, 3) * .6
+        env.rigid_body_states[:, 2:4, :3] += torch.randn(4096, 2, 3) * .4
+        env.dof_pos += torch.randn(4096, 29)
+        env._box_size *= .5 + torch.rand(4096, 3)
+        self.step(env)
+        env.box_states[:, :3] += torch.randn(4096, 3) * .05
+        first = self.step(env)
+        for value in env.carry_metrics.values():
+            self.assertTrue(bool(torch.isfinite(value).all()))
+        self.assertTrue(torch.isfinite(env.rew_buf).all())
+        # A changed environment cannot affect any other environment's spatial reward.
+        env.rigid_body_states[0, 2, 1] += 5
+        second = self.step(env)
+        torch.testing.assert_close(first["carry_hand_box_surface"][1:], second["carry_hand_box_surface"][1:])
+
+    def test_reference_data_fits_guardrails_without_online_reference(self):
+        data, _, _ = analyze.load_dataset()
+        for clip in data:
+            sampled = clip["policy_sampled"]
+            env = self.make_env(len(sampled["bp"]))
+            pos, rotation = sampled["poses"]["torso_link"]
+            env.rigid_body_states[:, 1, :3] = torch.tensor(pos)
+            env.rigid_body_states[:, 1, 3:7] = torch.tensor(Rotation.from_matrix(rotation).as_quat())
+            env.box_states[:, :3] = torch.tensor(sampled["bp"])
+            env.box_states[:, 3:7] = torch.tensor(sampled["bq"])
+            for i, side in enumerate(("left", "right")):
+                env.rigid_body_states[:, i + 2, :3] = torch.tensor(sampled["poses"][side + "_palm_link"][0])
+            env.dof_pos[:] = torch.tensor(sampled["dofs"])
+            self.step(env)
+            env.carry_previous_relative_pos[1:] = env.carry_previous_relative_pos[:-1].clone()
+            env.carry_previous_hand_box[1:] = env.carry_previous_hand_box[:-1].clone()
+            env.carry_history_valid[0] = False
+            rewards = self.step(env)
+            for name in ("carry_arm_range", "carry_relative_position"):
+                torch.testing.assert_close(rewards[name], torch.ones_like(rewards[name]))
+            for name in ("carry_hand_slip", "carry_relative_velocity"):
+                torch.testing.assert_close(rewards[name][1:], torch.ones_like(rewards[name][1:]))
+            # Raw palms do NOT establish a valid simulated contact: no fake retargeting.
+            self.assertTrue(bool((env.carry_metrics["left_hand_side_violation_m"] > 0).all()))
+
+    def test_protected_configuration_and_online_dependency_boundary(self):
+        r = self.cfg.rewards
+        self.assertEqual(r.scales.carry_lin_vel_tracking, 3.)
+        self.assertEqual(r.scales.carry_yaw_vel_tracking, 2.5)
+        self.assertEqual(r.scales.carry_relative_orientation, 0.)
         def non_reward_config(source):
             parsed = ast.parse(source)
             for node in parsed.body:
@@ -203,131 +336,22 @@ class RuntimeRewardTests(unittest.TestCase):
             cls = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef))
             return {n.name: ast.dump(n) for n in cls.body if isinstance(n, ast.FunctionDef)}
         current, baseline = methods((ROOT / ENV_PATH).read_text()), methods(old_source(ENV_PATH))
-        changed = {"_init_buffers", "reset_idx", "compute_reward"}
-        changed.update("_reward_" + name for name in self.old.REWARD_NAMES)
+        changed = {"_init_buffers", "reset_idx", "_post_physics_step_callback",
+                   "_reward_carry_hand_box_surface", "_reward_carry_relative_velocity",
+                   "_reward_carry_relative_position", "_reward_carry_relative_orientation", "_reward_carry_arm_pose"}
         for name in baseline.keys() - changed:
             self.assertEqual(current[name], baseline[name], name)
-
-    def test_runtime_dispatch_and_dependency_boundary(self):
-        self.assertIs(self.env_type.compute_reward, self.parent_type.compute_reward)
-        self.assertNotIn("compute_reward", self.env_type.__dict__)
-        source = (ROOT / ENV_PATH).read_text()
-        for forbidden in ("CarryCalibration", "CarryMetricAccumulator", "compute_preservation",
-                          "carry_preservation_rewards", "statistics.json", "carry_preservation_metrics"):
-            self.assertNotIn(forbidden, source)
-        q = torch.tensor(Rotation.from_rotvec([[0, 0, 0], [1e-10, 0, 0], [.2, -.3, .5], [0, 0, 3.14159]]).as_quat())
-        torch.testing.assert_close(self.runtime_log(q), self.old.quaternion_log(q))
-        torch.testing.assert_close(self.runtime_log(-q), self.old.quaternion_log(q))
-
-    def test_randomized_float32_batch_and_edge_grasps(self):
-        rng = np.random.default_rng(739)
-        c = self.old.CarryCalibration(self.calibration_data)
-        s = scene(c, 4096)
-        n = len(s["box_pos"])
-        def tensor(x):
-            return torch.tensor(x, dtype=torch.float32)
-        s["torso_pos"] = tensor(rng.uniform(-10, 10, (n, 3)))
-        s["torso_quat"] = tensor(Rotation.random(n, random_state=rng).as_quat())
-        relative = c.position_target + tensor(rng.normal(0, .04, (n, 3)))
-        s["box_pos"] = s["torso_pos"] + self.old.quat_rotate(s["torso_quat"], relative)
-        dq = tensor(Rotation.from_rotvec(rng.normal(0, [.09, .12, .47], (n, 3))).as_quat())
-        s["box_quat"] = self.old.quat_multiply(s["torso_quat"], self.old.quat_multiply(c.orientation_target_xyzw, dq))
-        s["box_size"] *= tensor(rng.uniform([.85, .85, .85], [1.15, 1.15, 1.20], (n, 3)))
-        offsets = c.hand_directions[None] * s["box_size"][:, None, 1:2] * .5
-        offsets += tensor(rng.normal(0, .025, (n, 2, 3)))
-        s["hand_pos"] = s["box_pos"][:, None] + self.old.quat_rotate(s["torso_quat"][:, None], offsets)
-        s["hand_pos"][0, 0] = s["box_pos"][0]  # degenerate ray
-        s["hand_pos"][1] = s["hand_pos"][1].flip(0)  # swapped sides
-        s["hand_pos"][2, 1] = s["hand_pos"][2, 0]  # both on one side
-        s["hand_pos"][3, 0, 0] += 1  # outside face boundary
-        s["previous_relative_pos"] = relative + tensor(rng.normal(0, .004, (n, 3)))
-        s["history_valid"][::7] = False
-        s["previous_relative_pos"][::7] = 1e6
-        s["arm_pos"] += tensor(rng.normal(0, .15, (n, 14)))
-        env, metrics = self.assert_equivalent(s)
-        for name, sums in env.carry_error_sums.items():
-            torch.testing.assert_close(sums, metrics[:, self.old.METRIC_NAMES.index(name)], atol=1e-4, rtol=2e-5)
-        signed = copy.deepcopy(s)
-        signed["torso_quat"] *= -1
-        signed["box_quat"] *= -1
-        self.assert_equivalent(signed)
-        env.dof_pos[:, :15] = 123  # waist/legs have no influence on arm reward
-        torch.testing.assert_close(env._reward_carry_arm_pose(), env.last_rewards["carry_arm_pose"])
-
-    def test_rigid_yaw_and_translation_sequence(self):
-        c = self.old.CarryCalibration(self.calibration_data)
-        nominal = scene(c, 5)
-        commands = torch.tensor([[0, 0, 0], [1.2, 0, 0], [0, -.4, 0], [0, 0, .5], [.96, -.32, -.4]])
-        nominal["history_valid"][:] = False
-        env = self.make_env(nominal)
-        previous = nominal["previous_relative_pos"]
-        for step in range(60):
-            s = copy.deepcopy(nominal)
-            t = step * .02
-            q = torch.tensor(Rotation.from_euler("z", (commands[:, 2] * t).numpy()).as_quat(), dtype=torch.float32)
-            translation = torch.cat((commands[:, :2] * t, torch.zeros(5, 1)), dim=-1)
-            s["torso_pos"], s["torso_quat"] = translation, q
-            s["box_pos"] = translation + self.old.quat_rotate(q, s["box_pos"])
-            s["box_quat"] = self.old.quat_multiply(q, s["box_quat"])
-            s["hand_pos"] = translation[:, None] + self.old.quat_rotate(q[:, None], s["hand_pos"])
-            s["previous_relative_pos"] = previous
-            s["history_valid"][:] = step > 0
-            self.set_state(env, s)
-            self.assert_equivalent(s, env)
-            previous = self.old.quat_rotate_inverse(q, s["box_pos"] - translation)
-            if step:
-                torch.testing.assert_close(env.last_rewards["carry_relative_velocity"], torch.ones(5))
-
-    def test_partial_reset_terminal_metrics_and_evaluation_trace(self):
-        c = self.old.CarryCalibration(self.calibration_data)
-        s = scene(c, 2)
-        s["history_valid"][:] = False
-        env = self.make_env(s, evaluation=True)
-        self.assertEqual((env.upper_body_index, env.carry_torso_index), (0, 1))
-        self.assert_equivalent(s, env)
-        self.assertNotIn("episode", env.extras)
-        self.assertFalse(bool(env.carry_motion_metric_valid.any()))
-        s["box_pos"][:, 0] += .02
-        s["history_valid"][:] = True
-        self.set_state(env, s)
-        _, terminal_metrics = self.assert_equivalent(s, env)
-        torch.testing.assert_close(env.carry_preservation_metrics, terminal_metrics)
-        env.reset_idx(torch.tensor([0]))
-        logged = env.extras["episode"]
-        self.assertEqual(logged["rew_existing"].item(), 1)
-        self.assertAlmostEqual(logged["carry/box_relative_motion_error_mps"].item(), 1, places=4)
-        self.assertAlmostEqual(logged["carry/box_relative_position_error_m"].item(), .01, places=5)
-        self.assertEqual(env.carry_history_valid.tolist(), [False, True])
-        self.assertEqual(env.carry_error_steps.tolist(), [0, 2])
-        self.assertEqual(env.carry_motion_samples.tolist(), [0, 1])
-        self.assertEqual(env.carry_previous_relative_pos[0].abs().sum().item(), 0)
-        torch.testing.assert_close(env.carry_preservation_metrics, terminal_metrics)
-        s["previous_relative_pos"] = env.carry_previous_relative_pos.clone()
-        s["history_valid"] = env.carry_history_valid.clone()
-        self.set_state(env, s)
-        self.assert_equivalent(s, env)
-        self.assertNotIn("episode", env.extras)
-        self.assertEqual(env.last_rewards["carry_relative_velocity"][0].item(), 0)
-        self.assertEqual(env.carry_preservation_metrics[0, self.old.MOTION_METRIC_INDEX].item(), 0)
-        env.reset_idx(torch.tensor([0]))
-        self.assertTrue(math.isnan(env.extras["episode"]["carry/box_relative_motion_error_mps"].item()))
-
-    def test_recorded_carrywith_policy_states(self):
-        data, _, _ = analyze.load_dataset()
-        for motion in data:
-            d = motion["policy_sampled"]
-            pos, rot = d["poses"]["torso_link"]
-            n = len(pos)
-            def tensor(x):
-                return torch.tensor(np.asarray(x), dtype=torch.float32)
-            relative = analyze.local(rot, d["bp"] - pos)
-            state = dict(torso_pos=tensor(pos), torso_quat=tensor(Rotation.from_matrix(rot).as_quat()),
-                         box_pos=tensor(d["bp"]), box_quat=tensor(d["bq"]),
-                         hand_pos=tensor(np.stack([d["poses"][side + "_palm_link"][0] for side in ("left", "right")], axis=1)),
-                         box_size=tensor(np.tile([.35, .35, .30], (n, 1))), arm_pos=tensor(d["dofs"][:, 15:]),
-                         previous_relative_pos=tensor(np.concatenate((relative[:1], relative[:-1]))),
-                         history_valid=torch.arange(n) > 0, dt=.02)
-            self.assert_equivalent(state)
+        for path in (ENV_PATH, CFG_PATH, EVAL_PATH):
+            source = (ROOT / path).read_text()
+            for forbidden in ("CarryCalibration", "compute_preservation", "carry_hand_direction",
+                              "carry_arm_target", "carry_arm_sigma", "position_target",
+                              "position_sigma", "orientation_target", "orientation_sigma", "velocity_sigma"):
+                self.assertNotIn(forbidden, source)
+        for name, body in current.items():
+            if name not in ("_reset_actors", "_reset_boxes"):
+                self.assertNotIn("motionlib", body)
+        from experiments.carrybox_locomotion_eval.evaluation.metrics import PRESERVATION_METRICS
+        self.assertEqual(METRIC_NAMES, PRESERVATION_METRICS)
 
 
 if __name__ == "__main__":

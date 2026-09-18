@@ -4,7 +4,8 @@ Quaternions are XYZW, positions are link origins in world coordinates, and
 hands are ordered [left_palm_link, right_palm_link]. The training environment
 implements its rewards directly in envs/g1/carrybox_locomotion.py and does not
 import this module. Keep these standalone kernels for CPU analysis and the
-evaluation trace adapter; their mathematics is the 7cb664d regression oracle.
+historical 7cb664d regression oracle. Neither training nor evaluation imports
+this module; current constraints and metrics are independent of this calibration.
 """
 
 import json

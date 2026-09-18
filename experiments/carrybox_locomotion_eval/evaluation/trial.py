@@ -5,7 +5,7 @@ import math
 import torch
 from isaacgym.torch_utils import quat_rotate_inverse
 
-from legged_gym.carry_preservation import METRIC_NAMES, MOTION_METRIC_INDEX
+from legged_gym.carry_constraint_metrics import METRIC_NAMES, TEMPORAL_METRICS
 from legged_gym.utils.torch_utils import calc_heading_quat
 
 from .inference import assert_observation_compatibility
@@ -149,11 +149,11 @@ def _sample(env, condition, *, policy_step, time_s, actions, previous_actions):
     }
     # Cache was computed from the same pre-reset physics state as the rewards.
     # run_trial skips reset frames; invalid first-step derivatives remain NaN.
-    for i, name in enumerate(METRIC_NAMES):
+    for name in METRIC_NAMES:
         sample[name] = (
             float("nan")
-            if i == MOTION_METRIC_INDEX and not bool(env.carry_motion_metric_valid[env_id])
-            else float(env.carry_preservation_metrics[env_id, i].item())
+            if name in TEMPORAL_METRICS and not bool(env.carry_motion_metric_valid[env_id])
+            else float(env.carry_metrics[name][env_id].item())
         )
     if tuple(sample) != TRACE_FIELDS:
         raise AssertionError("Trace schema changed unexpectedly")

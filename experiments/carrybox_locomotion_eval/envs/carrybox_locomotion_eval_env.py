@@ -4,8 +4,6 @@ import math
 
 import torch
 
-from legged_gym import LEGGED_GYM_ROOT_DIR
-from legged_gym.carry_preservation import CarryCalibration, compute_preservation
 from legged_gym.envs.g1 import carrybox_locomotion
 
 
@@ -19,26 +17,6 @@ class CarryBoxLocomotionEvalEnv(carrybox_locomotion.LeggedRobot):
             self.num_envs, 3, dtype=torch.float, device=self.device
         )
         self.eval_last_termination_reason = [""] * self.num_envs
-        # The nine-column trace is an evaluation concern, not a training buffer.
-        self._eval_carry_calibration = CarryCalibration.load(
-            LEGGED_GYM_ROOT_DIR + "/resources/config/carry_preservation.json",
-            device=self.device, dtype=self.dof_pos.dtype,
-        )
-
-    def _post_physics_step_callback(self):
-        super()._post_physics_step_callback()
-        # Preserve the existing pre-reset trace schema, including invalid motion
-        # on the first sample. Training's velocity reward updates history later.
-        torso = self.rigid_body_states[:, self.carry_torso_index]
-        self.carry_motion_metric_valid = self.carry_history_valid.clone()
-        _, self.carry_preservation_metrics, _ = compute_preservation(
-            torso[:, :3], torso[:, 3:7],
-            self.box_states[:, :3], self.box_states[:, 3:7],
-            self.rigid_body_states[:, self.carry_palm_indices, :3],
-            self._box_size, self.dof_pos[:, self.carry_arm_indices],
-            self.carry_previous_relative_pos, self.carry_motion_metric_valid,
-            self.dt, self._eval_carry_calibration,
-        )
 
     def set_evaluation_command(self, command):
         requested = torch.as_tensor(

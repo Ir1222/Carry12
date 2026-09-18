@@ -1,8 +1,11 @@
-# Generated CarryWith reference summary
+# Historical CarryWith target-matching audit
+
+This is the historical Gaussian calibration audit, not the current training objective.
+See REPORT.md and constraint_statistics.json for the physical-constraint redesign.
 
 Reproduce with `python -m experiments.carry_preservation.analyze` from the repository root.
 Full distributions, histograms, covariances and conditional correlations are in `statistics.json`.
-Source hashes and runtime parameters are in `legged_gym/resources/config/carry_preservation.json`.
+Source hashes and historical calibration parameters are in `legged_gym/resources/config/carry_preservation.json`.
 
 All three clips are used (773 frames at 60 Hz); differentiation never crosses clip boundaries.
 Root/base and pelvis are the same frame. Torso transforms are reconstructed using the current URDF.

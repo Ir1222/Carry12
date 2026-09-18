@@ -53,10 +53,11 @@ class G1Cfg(CarryBoxCfg):
 
             carry_bilateral_contact = 0.5
             carry_hand_box_surface = 1.5
+            carry_hand_slip = 0.5
             carry_relative_velocity = 0.5
             carry_relative_position = 0.75
-            carry_relative_orientation = 0.25
-            carry_arm_pose = 0.2
+            carry_relative_orientation = 0.0
+            carry_arm_range = 0.2
             zero_command_stillness = 0.2
 
             lin_vel_z = -1.0
@@ -90,50 +91,49 @@ class G1Cfg(CarryBoxCfg):
             base_height = 0.0
             joint_power = 0.0
 
-        # Final CarryWith calibration, copied without rounding from
-        # resources/config/carry_preservation.json at commit 7cb664d.
-        # That JSON and analysis/carry_preservation/statistics.json stay offline;
-        # training reads only these constants. Regression tests check equality.
-        carry_reference_policy_dt = 0.02
+        # Engineering feasible regions, NOT demonstration targets/confidence bounds.
+        # Offline evidence and per-joint broadening: analysis/carry_preservation/REPORT.md.
+        # Runtime uses these constants only; CarryWith is used only for RSI.
         carry_torso_link = "torso_link"
         carry_hand_links = ["left_palm_link", "right_palm_link"]
 
-        # Unit box-to-palm rays in the torso frame, from the CarryWith clips.
-        # Left must meet the box's +Y face; right must meet its -Y face.
-        carry_hand_direction_left = [-0.18807008519022791, 0.981842058522644, -0.024815623557696863]
-        carry_hand_direction_right = [0.2292152654769457, -0.9729077921719884, 0.030179297595546023]
-        carry_hand_normal_sigma = [0.02, 0.02]  # m; also used for face-boundary overflow
-        carry_hand_direction_sigma = [0.1302497874351225, 0.11122129436107886]  # rad
+        # Left +Y / right -Y; use actual randomized box half-extents.
+        # Palms have 30 mm normal freedom and 10 mm edge allowance (virtual link /
+        # contact-patch mismatch). The synthetic dataset cannot measure contact bands.
+        carry_hand_side_tolerance = 0.03  # m
+        carry_hand_face_margin = 0.01  # m outside x/z face edges
+        carry_hand_surface_violation_scale = 0.04  # m, post-dead-zone softness
+        # Observed tangential speeds: P95 ~0.211, max ~0.271 m/s.
+        carry_hand_slip_tolerance = 0.35  # m/s, norm of local x/z velocity
+        carry_hand_slip_violation_scale = 0.35  # m/s
 
-        # Arm-only prior: the order below matches target/sigma, with no waist.
+        # Arm-only guardrail, radians; no waist or leg supervision.
         carry_arm_joint_names = [
             "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
             "left_elbow_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
             "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
             "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
         ]
-        carry_arm_target = [  # rad
-            -0.12775056064128876, 0.07655864953994751, -0.0941256582736969,
-            0.1573413610458374, -0.24472947418689728, 0.0, 0.0,
-            -0.43349742889404297, -0.28036007285118103, 0.24257469177246094,
-            0.46407607197761536, 0.2483402043581009, 0.0, 0.0,
+        carry_arm_range_lower = [
+            -0.90, -0.25, -0.85, -0.25, -1.10, -0.60, -0.60,
+            -1.10, -1.00, -0.55, -0.25, -0.55, -0.60, -0.60,
         ]
-        carry_arm_sigma = [0.15] * 14  # rad
+        carry_arm_range_upper = [
+            0.55, 0.80, 0.70, 1.15, 0.55, 0.60, 0.60,
+            0.25, 0.25, 1.00, 1.40, 1.10, 0.60, 0.60,
+        ]
+        carry_arm_violation_scale = 0.35  # rad beyond any one joint's range
 
-        # torso_link origin -> box center, expressed in torso axes (m).
-        carry_box_relative_position_target = [
-            0.34750078866225004, -0.003911388585662426, 0.049450910653684545,
-        ]
-        carry_box_relative_position_sigma = [0.03, 0.038154325120839785, 0.03466218700457088]
-        # Torso-relative XYZW quaternion; SO(3) widths in rad, with weak yaw.
-        carry_box_relative_orientation_target = [
-            -0.0163041585521531, -0.055856736281097885, 0.022884953268880424, 0.9980433248811456,
-        ]
-        carry_box_relative_orientation_sigma = [
-            0.09012323316733016, 0.11665271531784734, 0.47389821765272633,
-        ]
-        # Finite difference of torso-frame position at policy dt, target zero (m/s).
-        carry_box_relative_velocity_sigma = [0.1751883601826239, 0.314361221419571, 0.3053264617085051]
+        # Observed min/max: x .327..364, y -.032...037, z .025...082 m.
+        # Widths are 9.4x / 5.9x / 7.0x the FULL observed spans, allowing reach,
+        # lateral balance and vertical load adjustment without a center target.
+        carry_box_relative_position_lower = [0.18, -0.20, -0.15]
+        carry_box_relative_position_upper = [0.53, 0.20, 0.25]
+        carry_box_position_violation_scale = [0.10, 0.10, 0.10]  # m
+        # Observed |v| P95 [.081,.141,.155], max [.157,.320,.307] m/s.
+        # Engineering dead zones accommodate contact oscillations; no dt lock.
+        carry_box_relative_velocity_tolerance = [0.35, 0.45, 0.45]  # m/s
+        carry_box_velocity_violation_scale = [0.35, 0.45, 0.45]  # m/s
 
         box_drop_height = 0.15
         robot_box_max_distance = 1.0

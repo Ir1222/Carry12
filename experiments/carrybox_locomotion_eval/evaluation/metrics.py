@@ -13,14 +13,34 @@ TRACKING_SCALES = {
     for axis, (low, high) in FULL_RANGES.items()
 }
 
-# Keep CSV reduction usable without Torch/Isaac Gym. The runtime sampler and
-# tests check this schema against legged_gym.carry_preservation.METRIC_NAMES.
+# Keep CSV reduction usable without an installed legged_gym package.
+# Runtime tests check equality against carry_constraint_metrics.METRIC_NAMES.
 PRESERVATION_METRICS = (
-    "left_hand_side_error_m", "right_hand_side_error_m",
-    "left_hand_direction_error_rad", "right_hand_direction_error_rad",
-    "hand_midpoint_error_m", "box_relative_position_error_m",
-    "box_relative_orientation_error_rad", "box_relative_motion_error_mps",
-    "arm_reference_error_rad",
+    'left_hand_side_error_m',
+    'right_hand_side_error_m',
+    'left_hand_side_violation_m',
+    'right_hand_side_violation_m',
+    'left_hand_face_overflow_m',
+    'right_hand_face_overflow_m',
+    'left_hand_face_violation_m',
+    'right_hand_face_violation_m',
+    'arm_range_violation_rad',
+    'arm_range_clearance_rad',
+    'box_relative_region_violation_m',
+    'box_relative_region_clearance_m',
+    'box_relative_position_x_m',
+    'box_relative_position_y_m',
+    'box_relative_position_z_m',
+    'bilateral_contact_rate',
+    'left_hand_tangential_slip_mps',
+    'right_hand_tangential_slip_mps',
+    'left_hand_slip_violation_mps',
+    'right_hand_slip_violation_mps',
+    'box_relative_motion_error_mps',
+    'box_relative_velocity_violation_mps',
+    'box_relative_velocity_x_mps',
+    'box_relative_velocity_y_mps',
+    'box_relative_velocity_z_mps',
 )
 
 
