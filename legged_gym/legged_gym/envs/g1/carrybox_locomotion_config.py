@@ -48,20 +48,22 @@ class G1Cfg(CarryBoxCfg):
 
     class rewards(CarryBoxCfg.rewards):
         class scales:
-            carry_lin_vel_tracking = 3.0 #2.0
-            carry_yaw_vel_tracking = 2.5 #1.0
+            carry_lin_vel_tracking = 3.0
+            carry_yaw_vel_tracking = 2.5
 
-            carry_bilateral_contact = 0 #1.5
-            carry_hand_box_surface = 1.0
-            carry_relative_velocity = 0 #0.5
-            carry_relative_position = 0 #0.5
+            carry_bilateral_contact = 0.5
+            carry_hand_box_surface = 1.5
+            carry_relative_velocity = 0.5
+            carry_relative_position = 0.75
+            carry_relative_orientation = 0.25
+            carry_arm_pose = 0.2
             zero_command_stillness = 0.2
 
             lin_vel_z = -1.0
             ang_vel_xy = -0.05
             orientation = -1.0
             carry_box_tilt = -0.5
-            carry_upper_body_pose = -0.05
+            carry_upper_body_pose = 0.0
 
             feet_air_time = 0.2
             feet_slip = -0.2
@@ -80,13 +82,17 @@ class G1Cfg(CarryBoxCfg):
             walk_task = 0.0
             carryup_task = 0.0
             carry_velocity_task = 0.0
-            carry_contact_task = 0.5
+            # Legacy coupled term contains uncompensated world velocity and a
+            # saturated distance reward; the separate terms above replace it.
+            carry_contact_task = 0.0
             feet_clearance = 0.0
             no_fly = 0.0
             base_height = 0.0
             joint_power = 0.0
 
-        carry_hand_surface_sigma = 0.06
+        carry_calibration_file = (
+            "{LEGGED_GYM_ROOT_DIR}/resources/config/carry_preservation.json"
+        )
         box_drop_height = 0.15
         robot_box_max_distance = 1.0
         box_tilt_termination_deg = 70.0

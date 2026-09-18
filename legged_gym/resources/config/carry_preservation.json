@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "source_sha256": {
+    "legged_gym/resources/config/carrybox_locomotion.yaml": "ef0b06bb8890360ea74cf0d9a1de817374d1f2fb824051a9f8da8117981dfbdb",
+    "legged_gym/resources/config/carrybox_no_relocation.yaml": "d905743df0ac0ca3d156a7abca15cd2aa39e9628aadd979e22997f54548454d8",
+    "legged_gym/resources/dataset/dataset_carrybox/carryWith/carrywith1.pt": "da7e7cb38bcc2324a9d6aeac347dfb94d567f624a4d0c8cb86f22c860bffafb9",
+    "legged_gym/resources/dataset/dataset_carrybox/carryWith/carrywith2.pt": "a35d464857092be005533adbfbe5b4e77ae637f8616210ddeb342f7fdd886ff0",
+    "legged_gym/resources/dataset/dataset_carrybox/carryWith/carrywith3.pt": "1f0868733cee5eafeb85f72fd2975c521f8d6d085f7961541c1f55f505c55d29",
+    "legged_gym/resources/config/joint_id.txt": "0e09bd4a124e1e00e92b742ff9954405bd7ff0c17ab42bc91072248bd6e72da7",
+    "legged_gym/resources/robots/g1/urdf/g1_29dof.urdf": "172b3d99d3c37944ca708abcaac8c9c0285c96b5c80c843f3803729aeaff947f",
+    "legged_gym/legged_gym/envs/motionlib/motionlib_carrybox.py": "c88409cd1a1f2f797af80fa56d21dfb302ac6e4bdd2a0001a9d10b1ab746d862",
+    "legged_gym/legged_gym/envs/g1/carrybox_config.py": "fd00ad88cf27e334a7043fc99c9629fe00fce5419a1682cee6568929575b05e3"
+  },
+  "source_hash_convention": "SHA256; CRLF normalized to LF for text, raw bytes for .pt",
+  "motion_frames": {
+    "carrywith1.pt": 256,
+    "carrywith2.pt": 194,
+    "carrywith3.pt": 323
+  },
+  "reference_fps": 60.0,
+  "policy_dt": 0.02,
+  "torso_link": "torso_link",
+  "hand_links": [
+    "left_palm_link",
+    "right_palm_link"
+  ],
+  "arm_joint_names": [
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "left_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_yaw_joint"
+  ],
+  "hand_directions": [
+    [
+      -0.18807008519022791,
+      0.981842058522644,
+      -0.024815623557696863
+    ],
+    [
+      0.2292152654769457,
+      -0.9729077921719884,
+      0.030179297595546023
+    ]
+  ],
+  "hand_direction_sigma": [
+    0.1302497874351225,
+    0.11122129436107886
+  ],
+  "hand_normal_sigma": [
+    0.02,
+    0.02
+  ],
+  "arm_target": [
+    -0.12775056064128876,
+    0.07655864953994751,
+    -0.0941256582736969,
+    0.1573413610458374,
+    -0.24472947418689728,
+    0.0,
+    0.0,
+    -0.43349742889404297,
+    -0.28036007285118103,
+    0.24257469177246094,
+    0.46407607197761536,
+    0.2483402043581009,
+    0.0,
+    0.0
+  ],
+  "arm_sigma": [
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15,
+    0.15
+  ],
+  "position_target": [
+    0.34750078866225004,
+    -0.003911388585662426,
+    0.049450910653684545
+  ],
+  "position_sigma": [
+    0.03,
+    0.038154325120839785,
+    0.03466218700457088
+  ],
+  "orientation_target_xyzw": [
+    -0.0163041585521531,
+    -0.055856736281097885,
+    0.022884953268880424,
+    0.9980433248811456
+  ],
+  "orientation_sigma": [
+    0.09012323316733016,
+    0.11665271531784734,
+    0.47389821765272633
+  ],
+  "motion_sigma": [
+    0.1751883601826239,
+    0.314361221419571,
+    0.3053264617085051
+  ],
+  "calibration_rule": "Equal-motion centers; widths=max(1.5*max_motion_P95(abs residual), floor)",
+  "floors": {
+    "hand_normal_m": 0.02,
+    "hand_direction_rad": 0.08726646259971647,
+    "arm_rad": 0.15,
+    "position_m": 0.03,
+    "orientation_rad": 0.08726646259971647,
+    "motion_mps": 0.1
+  },
+  "limitations": [
+    "No measured box dimensions; nominal box-normalized statistics are a scenario, not metadata.",
+    "Stored box center equals stored palm midpoint; box orientation is synthesized from pelvis heading.",
+    "Reference hands must be surface-retargeted to test physical nominal-box grasp geometry.",
+    "Two clips have constant arms. Width floors deliberately allow adaptation to randomized boxes."
+  ]
+}

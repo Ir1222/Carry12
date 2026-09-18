@@ -13,6 +13,16 @@ TRACKING_SCALES = {
     for axis, (low, high) in FULL_RANGES.items()
 }
 
+# Keep CSV reduction usable without Torch/Isaac Gym. The runtime sampler and
+# tests check this schema against legged_gym.carry_preservation.METRIC_NAMES.
+PRESERVATION_METRICS = (
+    "left_hand_side_error_m", "right_hand_side_error_m",
+    "left_hand_direction_error_rad", "right_hand_direction_error_rad",
+    "hand_midpoint_error_m", "box_relative_position_error_m",
+    "box_relative_orientation_error_rad", "box_relative_motion_error_mps",
+    "arm_reference_error_rad",
+)
+
 
 def mean(values):
     values = list(values)
@@ -175,6 +185,13 @@ def summarize_trial(condition, samples, *, policy_dt, requested_steps,
             "feet_slip_mean": mean(_values(samples, "feet_slip")),
         }
     )
+    for name in PRESERVATION_METRICS:
+        # Old traces have no preservation fields. Missing/invalid temporal
+        # samples are unavailable, never synthetic zeros.
+        values = [float(sample[name]) for sample in samples
+                  if name in sample and math.isfinite(float(sample[name]))]
+        row[name + "_mean"] = mean(values)
+        row[name + "_p95"] = percentile(values, 95.0)
     return row
 
 
@@ -190,7 +207,7 @@ COMMON_INTEGRITY_METRICS = (
     "box_tilt_max_deg",
     "robot_box_relative_linear_velocity_norm_mean",
     "robot_box_relative_linear_velocity_norm_p95",
-)
+) + tuple(name + suffix for name in PRESERVATION_METRICS for suffix in ("_mean", "_p95"))
 
 # Keep the mode summary focused on the behavior each command family probes.
 # The union is emitted as a stable CSV schema; non-applicable columns are NaN.
@@ -263,7 +280,7 @@ ALL_MODE_TRACKING_METRICS = tuple(
 def _finite(rows, metric):
     return [
         float(row[metric]) for row in rows
-        if math.isfinite(float(row[metric]))
+        if metric in row and math.isfinite(float(row[metric]))
     ]
 
 

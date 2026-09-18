@@ -5,10 +5,13 @@ import math
 import torch
 from isaacgym.torch_utils import quat_rotate_inverse
 
+from legged_gym.carry_preservation import METRIC_NAMES, MOTION_METRIC_INDEX
 from legged_gym.utils.torch_utils import calc_heading_quat
 
 from .inference import assert_observation_compatibility
-from .metrics import TRACKING_SCALES, summarize_trial
+from .metrics import PRESERVATION_METRICS, TRACKING_SCALES, summarize_trial
+
+assert PRESERVATION_METRICS == METRIC_NAMES
 
 
 TRACE_FIELDS = (
@@ -26,7 +29,7 @@ TRACE_FIELDS = (
     "base_yaw", "carry_heading_ref", "carry_heading_error",
     "legacy_body_vx", "legacy_body_vy", "legacy_body_yaw_rate",
     "action_delta_rms", "action_rate_rms", "torque_rms", "feet_slip",
-)
+) + METRIC_NAMES
 
 
 def duration_steps(seconds, policy_dt, *, allow_zero=False):
@@ -144,6 +147,14 @@ def _sample(env, condition, *, policy_step, time_s, actions, previous_actions):
         ),
         "feet_slip": float(feet_slip.item()),
     }
+    # Cache was computed from the same pre-reset physics state as the rewards.
+    # run_trial skips reset frames; invalid first-step derivatives remain NaN.
+    for i, name in enumerate(METRIC_NAMES):
+        sample[name] = (
+            float("nan")
+            if i == MOTION_METRIC_INDEX and not bool(env.carry_motion_metric_valid[env_id])
+            else float(env.carry_preservation_metrics[env_id, i].item())
+        )
     if tuple(sample) != TRACE_FIELDS:
         raise AssertionError("Trace schema changed unexpectedly")
     return sample

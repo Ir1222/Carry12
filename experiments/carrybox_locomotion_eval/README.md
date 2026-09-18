@@ -8,15 +8,7 @@ state machine in `carrybox_clean_perturb`.
 ## Run
 
 ```bash
-python3 experiments/carrybox_locomotion_eval/evaluator.py \
-  --resume_path legged_gym/logs/carrybox_locomotion/<RUN>/model_XXXX.pt \
-  --suite train_distribution \
-  --seed 1 \
-  --carry_motion_id 0 \
-  --carry_phase 0.5 \
-  --warmup 0.20 \
-  --duration 3.0 \
-  --save_csv
+python3 experiments/carrybox_locomotion_eval/evaluator.py --resume_path legged_gym/logs/carrybox_locomotion/Sep15_13-39-45_loaded_velocity_tracking_v1/model_13500.pt --suite train_distribution --seed 1 --carry_motion_id 0 --carry_phase 0.5 --warmup 0.20 --duration 3.0 --save_csv
 ```
 
 Add `--headless` for headless execution. Use `--mode stand|vx|vy|yaw|mixed`

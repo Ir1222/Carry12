@@ -2,7 +2,9 @@ import math
 import unittest
 
 from experiments.carrybox_locomotion_eval.evaluation.command_suite import CommandCondition
-from experiments.carrybox_locomotion_eval.evaluation.metrics import aggregate_by_mode, summarize_trial
+from experiments.carrybox_locomotion_eval.evaluation.metrics import (
+    PRESERVATION_METRICS, aggregate_by_mode, summarize_trial,
+)
 
 
 def sample(vx):
@@ -24,6 +26,32 @@ def sample(vx):
 
 
 class MetricTests(unittest.TestCase):
+    def test_preservation_metrics_include_failed_trials_and_ignore_invalid_motion(self):
+        a, b = sample(0.3), sample(0.7)
+        for name in PRESERVATION_METRICS:
+            a[name], b[name] = 0.02, 0.06
+        a["box_relative_motion_error_mps"] = float("nan")
+        row = summarize_trial(
+            CommandCondition("T0001", "mixed", 0.5, 0.1, 0.2, 1, 0, 0.5),
+            [a, b], policy_dt=0.02, requested_steps=3, executed_steps=2,
+            termination_reason="grasp_loss",
+        )
+        self.assertEqual(row["trial_completed"], 0)
+        self.assertAlmostEqual(row["left_hand_side_error_m_mean"], 0.04)
+        self.assertAlmostEqual(row["left_hand_side_error_m_p95"], 0.058)
+        self.assertAlmostEqual(row["box_relative_motion_error_mps_mean"], 0.06)
+        mode = aggregate_by_mode([row])[0]
+        self.assertAlmostEqual(mode["left_hand_side_error_m_mean_mean"], 0.04)
+        self.assertEqual(mode["completion_rate"], 0.0)
+
+    def test_legacy_samples_do_not_fabricate_preservation_metrics(self):
+        row = summarize_trial(
+            CommandCondition("T0001", "stand", 0, 0, 0, 1, 0, 0.5),
+            [sample(0.3)], policy_dt=0.02, requested_steps=1,
+            executed_steps=1, termination_reason="completed",
+        )
+        self.assertTrue(math.isnan(row["left_hand_side_error_m_mean"]))
+
     def test_signed_axis_metrics(self):
         condition = CommandCondition("T0001", "vx", 0.5, 0.0, 0.0, 1, 0, 0.5)
         row = summarize_trial(

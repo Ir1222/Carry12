@@ -5,8 +5,12 @@ import math
 import numpy as np
 import torch
 
-from isaacgym.torch_utils import quat_rotate_inverse, torch_rand_float
+from isaacgym.torch_utils import torch_rand_float
 
+from legged_gym import LEGGED_GYM_ROOT_DIR
+from legged_gym.carry_preservation import (
+    CarryCalibration, CarryMetricAccumulator, compute_preservation,
+)
 from legged_gym.utils.helpers import class_to_dict
 from legged_gym.utils.math import wrap_to_pi
 
@@ -47,15 +51,46 @@ class LeggedRobot(CarryBoxBase):
             requires_grad=False
         )
 
-        carry_start = int(
-            self.motionlib.motion_start_ids[self._CARRY_SKILL][0].item()
+        calibration_path = self.cfg.rewards.carry_calibration_file.format(
+            LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR
         )
-        carry_end = int(
-            self.motionlib.motion_end_ids[self._CARRY_SKILL][-1].item()
+        self.carry_calibration = CarryCalibration.load(
+            calibration_path, device=self.device, dtype=self.dof_pos.dtype
         )
-        self.carry_ref_dof_pos = torch.median(
-            self.motionlib.motion_dof_pos[carry_start:carry_end], dim=0
-        ).values
+        if not math.isclose(self.dt, self.carry_calibration.policy_dt, abs_tol=1e-8):
+            raise ValueError("Recalibrate carry motion widths for the changed policy dt")
+
+        def body_index(name):
+            index = self.gym.find_actor_rigid_body_handle(
+                self.envs[0], self.actor_handles[0], name
+            )
+            if index < 0:
+                raise ValueError("Carry preservation body is missing: " + name)
+            return index
+
+        # This index deliberately does not replace upper_body_index (pelvis),
+        # which defines the pretrained actor's observation/command semantics.
+        self.carry_torso_index = body_index(self.carry_calibration.torso_link)
+        self.carry_palm_indices = torch.tensor(
+            [body_index(name) for name in self.carry_calibration.hand_links],
+            device=self.device, dtype=torch.long,
+        )
+        self.carry_arm_indices = torch.tensor(
+            [self.dof_names.index(name) for name in self.carry_calibration.arm_joint_names],
+            device=self.device, dtype=torch.long,
+        )
+        self.carry_previous_relative_pos = torch.zeros(
+            self.num_envs, 3, device=self.device, dtype=self.dof_pos.dtype
+        )
+        self.carry_history_valid = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.bool
+        )
+        self.carry_metric_accumulator = CarryMetricAccumulator(
+            self.num_envs, self.device, self.dof_pos.dtype
+        )
+        self.carry_preservation_rewards = {}
+        self.carry_preservation_metrics = torch.zeros_like(self.carry_metric_accumulator.sums)
+        self.carry_motion_metric_valid = self.carry_history_valid.clone()
 
     def _reset_actors(self, env_ids):
         """Reset robot state from one coherent CarryWith reference frame."""
@@ -158,7 +193,12 @@ class LeggedRobot(CarryBoxBase):
         """Use the parent bookkeeping, then restore carry-only state."""
         if len(env_ids) == 0:
             return
+        # Read terminal diagnostics before the parent replaces actor/box state
+        # and resets episode_length_buf. Counts do not use that randomized age.
+        carry_episode = self.carry_metric_accumulator.pop(env_ids)
         super().reset_idx(env_ids)
+        self.extras["episode"].update(carry_episode)
+        self.carry_history_valid[env_ids] = False
         self.carry_policy_commands[env_ids, :3] = self.commands[env_ids, :3]
         self.is_stage_carry[env_ids] = True
         self.carry_velocity_active[env_ids] = True
@@ -307,56 +347,44 @@ class LeggedRobot(CarryBoxBase):
     def _reward_carry_bilateral_contact(self):
         return torch.all(self.hand_contact_filt, dim=-1).to(torch.float)
 
-    def _reward_carry_hand_box_surface(self):
-        hand_pos_world = self.rigid_body_states[
-            :, self.hand_colli_indices, :3
-        ]
-        hand_from_box = hand_pos_world - self.box_states[:, None, :3]
-        box_quat = self.box_states[:, None, 3:7].expand(
-            -1, hand_from_box.shape[1], -1
+    def compute_reward(self):
+        # The parent leaves extras in place on steps without resets. Remove the
+        # previous episode dictionary so the runner never logs stale episodes.
+        self.extras.pop("episode", None)
+        torso = self.rigid_body_states[:, self.carry_torso_index]
+        self.carry_motion_metric_valid = self.carry_history_valid.clone()
+        rewards, metrics, relative_pos = compute_preservation(
+            torso[:, :3], torso[:, 3:7],
+            self.box_states[:, :3], self.box_states[:, 3:7],
+            self.rigid_body_states[:, self.carry_palm_indices, :3],
+            self._box_size, self.dof_pos[:, self.carry_arm_indices],
+            self.carry_previous_relative_pos, self.carry_motion_metric_valid,
+            self.dt, self.carry_calibration,
         )
-        hand_pos_box = quat_rotate_inverse(
-            box_quat.reshape(-1, 4), hand_from_box.reshape(-1, 3)
-        ).reshape_as(hand_from_box)
-        half_size = 0.5 * self._box_size[:, None, :]
+        self.carry_preservation_rewards = rewards
+        self.carry_preservation_metrics = metrics
+        self.carry_metric_accumulator.add(metrics, self.carry_motion_metric_valid)
+        self.carry_previous_relative_pos.copy_(relative_pos)
+        self.carry_history_valid[:] = True
+        super().compute_reward()
 
-        signed_face_distance = torch.abs(hand_pos_box) - half_size
-        outside_distance = torch.norm(
-            torch.clamp(signed_face_distance, min=0.0), dim=-1
-        )
-        inside_distance = torch.min(
-            half_size - torch.abs(hand_pos_box), dim=-1
-        ).values
-        is_outside = torch.any(signed_face_distance > 0.0, dim=-1)
-        surface_distance = torch.where(
-            is_outside, outside_distance, inside_distance
-        )
-        sigma = self.cfg.rewards.carry_hand_surface_sigma
-        return torch.exp(-torch.square(surface_distance / sigma)).mean(dim=-1)
+    def _reward_carry_hand_box_surface(self):
+        return self.carry_preservation_rewards["carry_hand_box_surface"]
 
     def _reward_carry_relative_velocity(self):
-        robot_vel_xy = self.rigid_body_states[
-            :, self.upper_body_index, 7:9
-        ]
-        error = torch.sum(
-            torch.square(self.box_states[:, 7:9] - robot_vel_xy), dim=-1
-        )
-        return torch.exp(-5.0 * error)
+        return self.carry_preservation_rewards["carry_relative_velocity"]
 
     def _reward_carry_relative_position(self):
-        reward = torch.exp(-0.5 * self.robot2object_dist)
-        reward[
-            self.robot2object_dist < self.cfg.rewards.thresh_robot2object
-        ] = 1.0
-        return reward
+        return self.carry_preservation_rewards["carry_relative_position"]
+
+    def _reward_carry_relative_orientation(self):
+        return self.carry_preservation_rewards["carry_relative_orientation"]
 
     def _reward_carry_box_tilt(self):
         return torch.sum(torch.square(self.projected_gravity_box[:, :2]), dim=-1)
 
-    def _reward_carry_upper_body_pose(self):
-        indices = torch.cat((self.arm_joint_indices, self.waist_joint_indices))
-        error = self.dof_pos[:, indices] - self.carry_ref_dof_pos[indices]
-        return torch.sum(torch.square(error), dim=-1)
+    def _reward_carry_arm_pose(self):
+        return self.carry_preservation_rewards["carry_arm_pose"]
 
     def _reward_zero_command_stillness(self):
         stillness = torch.exp(
