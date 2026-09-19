@@ -10,6 +10,7 @@ from isaacgym.torch_utils import (
 )
 from legged_gym.utils.helpers import class_to_dict
 from legged_gym.utils.math import wrap_to_pi
+from legged_gym.utils.torch_utils import calc_heading_quat
 
 from .carrybox import LeggedRobot as CarryBoxBase
 
@@ -87,11 +88,25 @@ class LeggedRobot(CarryBoxBase):
             [self.dof_names.index(name) for name in rewards.carry_arm_joint_names],
             device=self.device, dtype=torch.long,
         )
+        self.carry_leg_indices = torch.tensor(
+            [self.dof_names.index(name) for name in rewards.carry_leg_joint_names],
+            device=self.device, dtype=torch.long,
+        )
+        self.carry_leg_range_lower = self.dof_pos.new_tensor(rewards.carry_leg_range_lower)
+        self.carry_leg_range_upper = self.dof_pos.new_tensor(rewards.carry_leg_range_upper)
+        self.carry_leg_violation_scale = self.dof_pos.new_tensor(rewards.carry_leg_violation_scale)
+        if any(t.shape != (12,) for t in (
+            self.carry_leg_indices, self.carry_leg_range_lower,
+            self.carry_leg_range_upper, self.carry_leg_violation_scale,
+        )):
+            raise ValueError("Carry leg names, bounds and softness must each have 12 entries")
+        if not torch.all(self.carry_leg_range_lower < self.carry_leg_range_upper) or not torch.all(self.carry_leg_violation_scale > 0):
+            raise ValueError("Carry leg bounds must be ordered and softness positive")
         self.previous_hand_box = self.dof_pos.new_zeros(self.num_envs, 2, 3)
         self.previous_box_relative_pos = self.dof_pos.new_zeros(self.num_envs, 3)
         self.carry_history_valid = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        # Six episode aggregates; count actual steps, not randomized episode ages.
-        self.carry_log_sums = self.dof_pos.new_zeros(self.num_envs, 6)
+        # Episode aggregates; count actual steps, not randomized episode ages.
+        self.carry_log_sums = self.dof_pos.new_zeros(self.num_envs, 9)
         self.carry_log_steps = self.dof_pos.new_zeros(self.num_envs, 2)  # all / valid temporal
 
     def _reset_actors(self, env_ids):
@@ -197,7 +212,7 @@ class LeggedRobot(CarryBoxBase):
             return
         super().reset_idx(env_ids)
         sums = self.carry_log_sums[env_ids].sum(0)
-        steps = self.carry_log_steps[env_ids].sum(0)[[0, 0, 1, 0, 0, 1]]
+        steps = self.carry_log_steps[env_ids].sum(0)[[0, 0, 1, 0, 0, 1, 0, 0, 0]]
         means = torch.where(steps > 0, sums / steps.clamp_min(1), float("nan"))
         self.extras["episode"].update({
             "carry/bilateral_contact": means[0],
@@ -206,6 +221,9 @@ class LeggedRobot(CarryBoxBase):
             "carry/arm_violation": means[3],
             "carry/box_position_violation": means[4],
             "carry/box_relative_velocity": means[5],
+            "carry/leg_range_violation": means[6],
+            "carry/stance_width": means[7],
+            "carry/stance_width_violation": means[8],
         })
         self.carry_log_sums[env_ids] = 0.0
         self.carry_log_steps[env_ids] = 0.0
@@ -429,6 +447,26 @@ class LeggedRobot(CarryBoxBase):
                                  self.carry_arm_range_lower, self.carry_arm_range_upper)
         self.carry_log_sums[:, 3] += excess.amax(-1)
         return constraint_reward(excess / self.cfg.rewards.carry_arm_violation_scale)
+
+    def _reward_carry_leg_range(self):
+        excess = range_violation(self.dof_pos[:, self.carry_leg_indices],
+                                 self.carry_leg_range_lower, self.carry_leg_range_upper)
+        self.carry_log_sums[:, 6] += excess.mean(-1)  # mean joint excess, rad
+        return constraint_reward(excess / self.carry_leg_violation_scale)
+
+    def _reward_carry_stance_width(self):
+        c = self.cfg.rewards
+        # feet_indices are the two ankle_pitch links, matching MotionLib.
+        # Rotating their difference cancels pelvis translation and gives the
+        # same lateral separation as transforming both feet into its yaw frame.
+        feet = self.rigid_body_states[:, self.feet_indices, :3]
+        separation = quat_rotate_inverse(
+            calc_heading_quat(self.root_states[:, 3:7]), feet[:, 0] - feet[:, 1])
+        width = separation[:, 1].abs()
+        excess = (width - c.carry_max_feet_lateral_distance).clamp_min(0.0)
+        self.carry_log_sums[:, 7] += width
+        self.carry_log_sums[:, 8] += excess
+        return constraint_reward((excess / c.carry_feet_lateral_violation_scale).unsqueeze(-1))
 
     def _reward_zero_command_stillness(self):
         stillness = torch.exp(

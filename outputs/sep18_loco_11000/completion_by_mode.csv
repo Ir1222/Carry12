@@ -1,0 +1,6 @@
+mode,trials,completed,completion_rate
+stand,1,1,1.0
+vx,6,3,0.5
+vy,6,5,0.8333333333333334
+yaw,6,4,0.6666666666666666
+mixed,24,19,0.7916666666666666

@@ -58,6 +58,8 @@ class G1Cfg(CarryBoxCfg):
             carry_relative_position = 0.75
             carry_relative_orientation = 0.0
             carry_arm_range = 0.2
+            carry_leg_range = 0.5
+            carry_stance_width = 0.3
             zero_command_stillness = 0.2
 
             lin_vel_z = -1.0
@@ -91,7 +93,7 @@ class G1Cfg(CarryBoxCfg):
             base_height = 0.0
             joint_power = 0.0
 
-        # Physical carry constraints; CarryWith is used only for RSI.
+        # Physical carry constraints; reference statistics below are offline only.
         carry_torso_link = "torso_link"
         carry_hand_links = ["left_palm_link", "right_palm_link"]
 
@@ -102,7 +104,7 @@ class G1Cfg(CarryBoxCfg):
         carry_hand_slip_tolerance = 0.35  # m/s, norm of local x/z velocity
         carry_hand_slip_violation_scale = 0.35  # m/s
 
-        # Arm-only guardrail, radians; no waist or leg supervision.
+        # Arm-only guardrail, radians.
         carry_arm_joint_names = [
             "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
             "left_elbow_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
@@ -118,6 +120,35 @@ class G1Cfg(CarryBoxCfg):
             0.25, 0.25, 1.00, 1.40, 1.10, 0.60, 0.60,
         ]
         carry_arm_violation_scale = 0.35  # rad beyond any one joint's range
+
+        # All 773 frames of carrywith1/2/3.pt: P1/P99 plus margins (rad).
+        # Hip roll/yaw: max(0.04, 0.15*span); others: max(0.06, 0.20*span).
+        # Clipped to URDF limits with 0.02 rad clearance, except saturated knees
+        # and ankle rolls: 0.0001 rad. Raw references slightly exceed those limits.
+        # Rounded outward where not URDF-clipped; no preferred pose in the range.
+        carry_leg_joint_names = [
+            "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+            "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+            "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+            "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+        ]
+        carry_leg_range_lower = [
+            -0.6077, -0.3364, -1.2562, -0.087167, -0.4483, -0.2617,
+            -0.5830, -0.1907, -0.4138, -0.087167, -0.6344, -0.1565,
+        ]
+        carry_leg_range_upper = [
+            0.8094, 0.1562, 0.4030, 1.2273, 0.2624, 0.2617,
+            0.8535, 0.4900, 0.8239, 1.3980, 0.2731, 0.2617,
+        ]
+        carry_leg_violation_scale = [
+            0.25, 0.15, 0.20, 0.25, 0.20, 0.15,
+            0.25, 0.15, 0.20, 0.25, 0.20, 0.15,
+        ]  # rad beyond each joint's feasible range
+
+        # Ankle-pitch link separation in pelvis heading coordinates, all clips:
+        # P50/P95/P99/max = 0.1562/0.2503/0.2727/0.2772 m; P99 + 0.03 m.
+        carry_max_feet_lateral_distance = 0.303  # m, rounded up
+        carry_feet_lateral_violation_scale = 0.10  # m beyond the maximum
 
         # Box workspace in torso_link coordinates (m), with no preferred center.
         carry_box_relative_position_lower = [0.18, -0.20, -0.15]
