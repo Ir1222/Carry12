@@ -74,6 +74,8 @@ def _carry_sample(env, previous_hand_box=None, previous_box_pos=None):
     foot_heading = env.carry_foot_heading_error[0]
     waist = env.dof_pos[0, env.carry_waist_indices]
     torso_rpy = env.carry_torso_pelvis_rpy[0]
+    waist_error = env.carry_waist_error[0]
+    torso_rotvec_error = env.carry_torso_pelvis_rotvec_error[0]
     metrics.update({
         "left_hip_roll_error_rad": hip[0].item(),
         "right_hip_roll_error_rad": hip[2].item(),
@@ -92,6 +94,13 @@ def _carry_sample(env, previous_hand_box=None, previous_box_pos=None):
         "torso_pelvis_relative_yaw_rad": torso_rpy[2].item(),
         "torso_pelvis_relative_roll_rad": torso_rpy[0].item(),
         "torso_pelvis_relative_pitch_rad": torso_rpy[1].item(),
+        "waist_yaw_error_rad": waist_error[0].item(),
+        "waist_roll_error_rad": waist_error[1].item(),
+        "waist_pitch_error_rad": waist_error[2].item(),
+        "torso_pelvis_rotvec_x_error_rad": torso_rotvec_error[0].item(),
+        "torso_pelvis_rotvec_y_error_rad": torso_rotvec_error[1].item(),
+        "torso_pelvis_rotvec_z_error_rad": torso_rotvec_error[2].item(),
+        "torso_pelvis_alignment_error_rad": torso_rotvec_error.norm().item(),
     })
     return metrics, hand_box, box_pos
 

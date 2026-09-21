@@ -32,6 +32,11 @@ LOWER_BODY_TRACE_METRICS = (
     "torso_pelvis_relative_yaw_rad",
     "torso_pelvis_relative_roll_rad",
     "torso_pelvis_relative_pitch_rad",
+    "waist_yaw_error_rad", "waist_roll_error_rad", "waist_pitch_error_rad",
+    "torso_pelvis_rotvec_x_error_rad",
+    "torso_pelvis_rotvec_y_error_rad",
+    "torso_pelvis_rotvec_z_error_rad",
+    "torso_pelvis_alignment_error_rad",
 )
 
 LOWER_BODY_SUMMARY_METRICS = (
@@ -44,6 +49,11 @@ LOWER_BODY_SUMMARY_METRICS = (
     "torso_pelvis_relative_yaw_rms_rad",
     "torso_pelvis_relative_roll_rms_rad",
     "torso_pelvis_relative_pitch_rms_rad",
+    "waist_yaw_error_rms_rad", "waist_yaw_error_p95_rad",
+    "waist_roll_error_rms_rad", "waist_roll_error_p95_rad",
+    "waist_pitch_error_rms_rad", "waist_pitch_error_p95_rad",
+    "torso_pelvis_alignment_error_rms_rad",
+    "torso_pelvis_alignment_error_p95_rad",
 )
 
 
@@ -194,6 +204,7 @@ def summarize_trial(condition, samples, *, policy_dt, requested_steps,
                 relative_velocity, 95.0
             ),
             "bilateral_hand_contact_fraction": mean(bilateral),
+            "bilateral_contact_rate": mean(bilateral),
             "grasp_loss_fraction": mean(grasp_loss),
             "grasp_loss_occurrence": int(
                 any(grasp_loss) or termination_reason == "grasp_loss"
@@ -220,6 +231,10 @@ def summarize_trial(condition, samples, *, policy_dt, requested_steps,
                   if name in sample and math.isfinite(float(sample[name]))]
         row[name + "_mean"] = mean(values)
         row[name + "_p95"] = percentile(values, 95.0)
+    row["hand_slip"] = mean(
+        _available_values(samples, "left_hand_tangential_slip_mps")
+        + _available_values(samples, "right_hand_tangential_slip_mps")
+    )
 
     hip_roll = (
         _available_values(samples, "left_hip_roll_error_rad")
@@ -255,12 +270,22 @@ def summarize_trial(condition, samples, *, policy_dt, requested_steps,
         for axis in ("yaw", "roll", "pitch"):
             values = _available_values(samples, f"{prefix}_{axis}_rad")
             row[f"{prefix}_{axis}_rms_rad"] = rms(values)
+    for axis in ("yaw", "roll", "pitch"):
+        values = _available_values(samples, f"waist_{axis}_error_rad")
+        row[f"waist_{axis}_error_rms_rad"] = rms(values)
+        row[f"waist_{axis}_error_p95_rad"] = percentile(
+            (abs(value) for value in values), 95.0)
+    alignment = _available_values(samples, "torso_pelvis_alignment_error_rad")
+    row["torso_pelvis_alignment_error_rms_rad"] = rms(alignment)
+    row["torso_pelvis_alignment_error_p95_rad"] = percentile(alignment, 95.0)
     return row
 
 
 COMMON_INTEGRITY_METRICS = (
     "survival_duration_s",
     "bilateral_hand_contact_fraction",
+    "bilateral_contact_rate",
+    "hand_slip",
     "grasp_loss_fraction",
     "robot_box_distance_mean",
     "robot_box_distance_p95",

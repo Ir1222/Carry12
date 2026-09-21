@@ -68,6 +68,21 @@ def quaternion_to_rpy(quaternion):
     return torch.stack((roll, pitch, yaw), dim=-1)
 
 
+def quaternion_rotation_vector(quaternion):
+    """Principal SO(3) log for XYZW quaternions, invariant to q versus -q."""
+    quaternion = quaternion / quaternion.norm(
+        dim=-1, keepdim=True).clamp_min(1.0e-12)
+    quaternion = torch.where(
+        quaternion[..., 3:4] < 0.0, -quaternion, quaternion)
+    vector = quaternion[..., :3]
+    sin_half_angle = vector.norm(dim=-1, keepdim=True)
+    half_angle = torch.atan2(
+        sin_half_angle, quaternion[..., 3:4].clamp(0.0, 1.0))
+    scale = 2.0 * half_angle / sin_half_angle.clamp_min(1.0e-12)
+    scale = torch.where(sin_half_angle > 1.0e-7, scale, 2.0)
+    return vector * scale
+
+
 class LeggedRobot(CarryBoxBase):
     """CarryBox variant that starts in, and remains in, the carry phase."""
 
@@ -167,6 +182,21 @@ class LeggedRobot(CarryBoxBase):
             [self.dof_names.index(name) for name in rewards.carry_waist_joint_names],
             device=self.device, dtype=torch.long,
         )
+        self.carry_waist_reference_target = self.dof_pos.new_tensor(
+            rewards.carry_waist_reference_target)
+        self.carry_waist_reference_deadzone = self.dof_pos.new_tensor(
+            rewards.carry_waist_reference_deadzone)
+        self.carry_waist_reference_softness = self.dof_pos.new_tensor(
+            rewards.carry_waist_reference_softness)
+        self.carry_torso_pelvis_reference_quat = self.dof_pos.new_tensor(
+            rewards.carry_torso_pelvis_reference_quat)
+        self.carry_torso_pelvis_reference_quat /= (
+            self.carry_torso_pelvis_reference_quat.norm().clamp_min(1.0e-12)
+        )
+        self.carry_torso_pelvis_alignment_deadzone = self.dof_pos.new_tensor(
+            rewards.carry_torso_pelvis_alignment_deadzone)
+        self.carry_torso_pelvis_alignment_softness = self.dof_pos.new_tensor(
+            rewards.carry_torso_pelvis_alignment_softness)
         self.carry_feet_width_range = self.dof_pos.new_tensor(
             rewards.carry_feet_width_range)
         self.carry_knee_width_range = self.dof_pos.new_tensor(
@@ -182,11 +212,31 @@ class LeggedRobot(CarryBoxBase):
             raise ValueError("Carry hip names, targets, dead zones and softness must have four entries")
         if self.carry_foot_indices.shape != (2,) or self.carry_knee_indices.shape != (2,):
             raise ValueError("Carry foot and knee link lists must contain left and right entries")
-        if self.carry_waist_indices.shape != (3,):
-            raise ValueError("Carry waist diagnostics require yaw, roll and pitch joints")
+        expected_waist_names = (
+            "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+        )
+        if tuple(rewards.carry_waist_joint_names) != expected_waist_names:
+            raise ValueError(
+                "Carry waist reference requires exactly yaw, roll and pitch, in that order"
+            )
+        if any(t.shape != (3,) for t in (
+            self.carry_waist_indices,
+            self.carry_waist_reference_target,
+            self.carry_waist_reference_deadzone,
+            self.carry_waist_reference_softness,
+            self.carry_torso_pelvis_alignment_deadzone,
+            self.carry_torso_pelvis_alignment_softness,
+        )) or self.carry_torso_pelvis_reference_quat.shape != (4,):
+            raise ValueError(
+                "Carry waist/alignment targets, dead zones and softness have invalid shapes"
+            )
         if (not torch.all(self.carry_hip_deadzone >= 0)
                 or not torch.all(self.carry_hip_softness > 0)
                 or not torch.all(self.carry_foot_heading_softness > 0)
+                or not torch.all(self.carry_waist_reference_deadzone >= 0)
+                or not torch.all(self.carry_waist_reference_softness > 0)
+                or not torch.all(self.carry_torso_pelvis_alignment_deadzone >= 0)
+                or not torch.all(self.carry_torso_pelvis_alignment_softness > 0)
                 or rewards.carry_foot_heading_deadzone < 0
                 or rewards.carry_feet_width_softness <= 0
                 or rewards.carry_knee_width_softness <= 0
@@ -200,7 +250,7 @@ class LeggedRobot(CarryBoxBase):
         # Episode aggregates; count actual steps, not randomized episode ages.
         self.carry_log_sums = self.dof_pos.new_zeros(self.num_envs, 9)
         self.carry_log_steps = self.dof_pos.new_zeros(self.num_envs, 2)  # all / valid temporal
-        self.carry_lower_log_sums = self.dof_pos.new_zeros(self.num_envs, 25)
+        self.carry_lower_log_sums = self.dof_pos.new_zeros(self.num_envs, 38)
         self.carry_lower_log_steps = self.dof_pos.new_zeros(self.num_envs)
 
     def _reset_actors(self, env_ids):
@@ -352,6 +402,19 @@ class LeggedRobot(CarryBoxBase):
             "carry/torso_pelvis_relative_yaw_rms": lower_means[22].clamp_min(0.0).sqrt(),
             "carry/torso_pelvis_relative_roll_rms": lower_means[23].clamp_min(0.0).sqrt(),
             "carry/torso_pelvis_relative_pitch_rms": lower_means[24].clamp_min(0.0).sqrt(),
+            "carry/waist_reference_reward": lower_means[25],
+            "carry/waist_yaw_error_abs": lower_means[26],
+            "carry/waist_roll_error_abs": lower_means[27],
+            "carry/waist_pitch_error_abs": lower_means[28],
+            "carry/waist_yaw_excess": lower_means[29],
+            "carry/waist_roll_excess": lower_means[30],
+            "carry/waist_pitch_excess": lower_means[31],
+            "carry/torso_pelvis_alignment_reward": lower_means[32],
+            "carry/torso_pelvis_rotvec_x_abs": lower_means[33],
+            "carry/torso_pelvis_rotvec_y_abs": lower_means[34],
+            "carry/torso_pelvis_rotvec_z_abs": lower_means[35],
+            "carry/torso_pelvis_alignment_excess": lower_means[36],
+            "carry/torso_pelvis_alignment_error": lower_means[37],
         })
         self.carry_log_sums[env_ids] = 0.0
         self.carry_log_steps[env_ids] = 0.0
@@ -584,11 +647,37 @@ class LeggedRobot(CarryBoxBase):
         relative_torso_quat = quat_mul(
             quat_conjugate(pelvis_quat), torso[:, 3:7])
         self.carry_torso_pelvis_rpy = quaternion_to_rpy(relative_torso_quat)
+        self.carry_waist_error = waist - self.carry_waist_reference_target
+        self.carry_waist_excess = (
+            self.carry_waist_error.abs() - self.carry_waist_reference_deadzone
+        ).clamp_min(0.0)
+        self.carry_waist_reference_reward = deadzone_gaussian_reward(
+            self.carry_waist_error,
+            self.carry_waist_reference_deadzone,
+            self.carry_waist_reference_softness,
+        )
+        reference_quat = self.carry_torso_pelvis_reference_quat.unsqueeze(
+            0).expand_as(relative_torso_quat)
+        relative_error_quat = quat_mul(
+            quat_conjugate(reference_quat), relative_torso_quat)
+        self.carry_torso_pelvis_rotvec_error = quaternion_rotation_vector(
+            relative_error_quat)
+        self.carry_torso_pelvis_alignment_excess = (
+            self.carry_torso_pelvis_rotvec_error.abs()
+            - self.carry_torso_pelvis_alignment_deadzone
+        ).clamp_min(0.0)
+        self.carry_torso_pelvis_alignment_reward = deadzone_gaussian_reward(
+            self.carry_torso_pelvis_rotvec_error,
+            self.carry_torso_pelvis_alignment_deadzone,
+            self.carry_torso_pelvis_alignment_softness,
+        )
 
         hip_abs = self.carry_hip_error.abs()
         foot_heading_abs = self.carry_foot_heading_error.abs()
         waist_abs = waist.abs()
         torso_abs = self.carry_torso_pelvis_rpy.abs()
+        waist_error_abs = self.carry_waist_error.abs()
+        torso_rotvec_abs = self.carry_torso_pelvis_rotvec_error.abs()
         self.carry_lower_log_sums += torch.stack((
             hip_abs[:, [0, 2]].mean(-1),
             hip_abs[:, [1, 3]].mean(-1),
@@ -604,6 +693,15 @@ class LeggedRobot(CarryBoxBase):
             self.carry_torso_pelvis_rpy[:, 2].square(),
             self.carry_torso_pelvis_rpy[:, 0].square(),
             self.carry_torso_pelvis_rpy[:, 1].square(),
+            self.carry_waist_reference_reward,
+            waist_error_abs[:, 0], waist_error_abs[:, 1], waist_error_abs[:, 2],
+            self.carry_waist_excess[:, 0], self.carry_waist_excess[:, 1],
+            self.carry_waist_excess[:, 2],
+            self.carry_torso_pelvis_alignment_reward,
+            torso_rotvec_abs[:, 0], torso_rotvec_abs[:, 1],
+            torso_rotvec_abs[:, 2],
+            self.carry_torso_pelvis_alignment_excess.norm(dim=-1),
+            self.carry_torso_pelvis_rotvec_error.norm(dim=-1),
         ), dim=-1)
         self.carry_lower_log_steps += 1
 
@@ -650,6 +748,12 @@ class LeggedRobot(CarryBoxBase):
             self.carry_hip_error, self.carry_hip_deadzone,
             self.carry_hip_softness,
         )
+
+    def _reward_carry_waist_reference(self):
+        return self.carry_waist_reference_reward
+
+    def _reward_carry_torso_pelvis_alignment(self):
+        return self.carry_torso_pelvis_alignment_reward
 
     def _reward_carry_foot_heading(self):
         return deadzone_gaussian_reward(

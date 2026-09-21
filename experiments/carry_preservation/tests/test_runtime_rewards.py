@@ -7,11 +7,13 @@ Run: python -m unittest discover -s experiments/carry_preservation/tests -v
 """
 
 import ast
+import hashlib
 import importlib.util
 import math
 from pathlib import Path
 import types
 import unittest
+import xml.etree.ElementTree as ET
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -64,8 +66,18 @@ UPPER_BODY_REWARDS = (
 LOWER_BODY_REWARDS = (
     "carry_hip_posture", "carry_foot_heading",
     "carry_feet_width", "carry_knee_width",
+    "carry_waist_reference", "carry_torso_pelvis_alignment",
 )
 REWARDS = UPPER_BODY_REWARDS + LOWER_BODY_REWARDS
+
+UPPER_BODY_AST_HASHES = {
+    "_reward_carry_bilateral_contact": "d6e25c5a4057416482f1ef48abf139b85023656b00d8252b7907a3eb8e50426d",
+    "_reward_carry_hand_box_surface": "7704857c00a0d7250fb0a26297b2c00a507bdaccf40e7c8bbf38d6f62c85c402",
+    "_reward_carry_hand_slip": "1325ac1cf23a3917068b46c84ce97879ce1454ca0a2d45ef9cd0159434921c6d",
+    "_reward_carry_relative_velocity": "e152aa929c556cf09abf8b0c9ea2576eeb422d22307076694eee6b700844b50c",
+    "_reward_carry_relative_position": "baedf8f48c2e23a492f74a129c9bdd3e348014212fd3f946fa86e021e0f945b9",
+    "_reward_carry_arm_range": "56f60576c659998fbbc6549d051600aff5f6d45c171dbc2e0d9a1472f2b9d34e",
+}
 
 
 class RuntimeRewardTests(unittest.TestCase):
@@ -94,6 +106,8 @@ class RuntimeRewardTests(unittest.TestCase):
         ns["CarryBoxBase"] = ns["LeggedRobot"]
         definitions((ROOT / ENV_PATH).read_text(), ENV_PATH, ns)
         cls.env_type = ns["LeggedRobot"]
+        cls.quaternion_rotation_vector = staticmethod(
+            ns["quaternion_rotation_vector"])
         definitions((ROOT / "experiments/carrybox_locomotion_eval/evaluation/trial.py").read_text(),
                     "trial.py", ns)
         cls.eval_sample = staticmethod(ns["_carry_sample"])
@@ -125,6 +139,10 @@ class RuntimeRewardTests(unittest.TestCase):
         env.rigid_body_states[..., 6] = 1
         env.root_states[:, 6] = 1
         env.box_states[:, 6] = 1
+        env.dof_pos[:, env.carry_waist_indices] = (
+            env.carry_waist_reference_target)
+        env.rigid_body_states[:, env.carry_torso_index, 3:7] = (
+            env.carry_torso_pelvis_reference_quat)
         env._box_size = env.dof_pos.new_tensor([.35, .35, .30]).repeat(n, 1)
         env.dof_pos[:, env.carry_arm_indices] = (env.carry_arm_range_lower + env.carry_arm_range_upper) / 2
         env.box_states[:, :3] = env.dof_pos.new_tensor([.35, 0, .05])
@@ -186,6 +204,170 @@ class RuntimeRewardTests(unittest.TestCase):
         self.assertEqual(self.cfg.env.num_actor_obs, 738)
         self.assertEqual(
             self.cfg.env.num_actor_obs // self.cfg.env.num_actor_history, 123)
+        self.assertEqual(self.cfg.env.num_actions, 29)
+        self.assertEqual(self.cfg.env.num_dofs, 29)
+
+    def test_v2_reward_scales_and_moderate_commands(self):
+        expected_scales = {
+            "carry_lin_vel_tracking": 3.0,
+            "carry_yaw_vel_tracking": 2.5,
+            "carry_bilateral_contact": 0.5,
+            "carry_hand_box_surface": 1.5,
+            "carry_hand_slip": 0.5,
+            "carry_relative_velocity": 0.5,
+            "carry_relative_position": 0.75,
+            "carry_relative_orientation": 0.0,
+            "carry_arm_range": 0.2,
+            "carry_waist_reference": 0.4,
+            "carry_torso_pelvis_alignment": 0.2,
+            "carry_hip_posture": 0.8,
+            "carry_foot_heading": 0.35,
+            "carry_feet_width": 0.30,
+            "carry_knee_width": 0.20,
+            "carry_leg_range": 0.0,
+            "carry_stance_width": 0.0,
+            "carry_upper_body_pose": 0.0,
+        }
+        for name, expected in expected_scales.items():
+            self.assertEqual(getattr(self.cfg.rewards.scales, name), expected)
+        self.assertEqual(
+            self.cfg.commands.carry_command_mode_probabilities,
+            [0.10, 0.25, 0.15, 0.15, 0.35],
+        )
+        self.assertEqual(self.cfg.commands.carry_yaw_rate_range, [-0.5, 0.5])
+
+    def test_upper_body_reward_implementations_are_unchanged(self):
+        tree = ast.parse((ROOT / ENV_PATH).read_text())
+        actual = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in UPPER_BODY_AST_HASHES:
+                dump = ast.dump(node, include_attributes=False)
+                actual[node.name] = hashlib.sha256(dump.encode()).hexdigest()
+        self.assertEqual(actual, UPPER_BODY_AST_HASHES)
+
+    def test_verified_carrywith_waist_calibration_and_joint_order(self):
+        mapping_path = ROOT / "legged_gym/resources/config/joint_id.txt"
+        mapping = {
+            name: int(index)
+            for index, name in (
+                line.split() for line in mapping_path.read_text().splitlines()
+            )
+        }
+        waist_names = (
+            "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+        )
+        self.assertEqual(tuple(self.cfg.rewards.carry_waist_joint_names), waist_names)
+        self.assertEqual(tuple(mapping[name] for name in waist_names), (12, 13, 14))
+
+        urdf = ET.parse(
+            ROOT / "legged_gym/resources/robots/g1/urdf/g1_29dof.urdf"
+        ).getroot()
+        joints = {joint.get("name"): joint for joint in urdf.findall("joint")}
+        chain = (
+            ("waist_yaw_joint", "pelvis", "waist_yaw_link"),
+            ("waist_roll_joint", "waist_yaw_link", "waist_roll_link"),
+            ("waist_pitch_joint", "waist_roll_link", "torso_link"),
+        )
+        for name, parent, child in chain:
+            self.assertEqual(joints[name].find("parent").get("link"), parent)
+            self.assertEqual(joints[name].find("child").get("link"), child)
+
+        frames = []
+        motion_dir = ROOT / "legged_gym/resources/dataset/dataset_carrybox/carryWith"
+        for path in sorted(motion_dir.glob("carrywith*.pt")):
+            try:
+                motion = torch.load(path, map_location="cpu", weights_only=True)
+            except TypeError:
+                motion = torch.load(path, map_location="cpu")
+            frames.append(motion["joint_position"][:, [12, 13, 14]])
+        waist = torch.cat(frames).numpy()
+        self.assertEqual(len(waist), 773)
+        np.testing.assert_allclose(
+            np.median(waist, axis=0),
+            self.cfg.rewards.carry_waist_reference_target,
+            atol=1.0e-8,
+        )
+        np.testing.assert_allclose(
+            np.percentile(waist, [5, 95], axis=0),
+            [[-0.310877460, -0.022957506, 0.155981871],
+             [0.212081027, 0.093573584, 0.361138302]],
+            atol=1.0e-8,
+        )
+
+        yaw, roll, pitch = waist.T
+        relative = (
+            Rotation.from_euler("z", yaw).as_matrix()
+            @ Rotation.from_euler("x", roll).as_matrix()
+            @ Rotation.from_euler("y", pitch).as_matrix()
+        )
+        reference = Rotation.from_matrix(relative).mean().as_quat()
+        if reference[3] < 0.0:
+            reference = -reference
+        np.testing.assert_allclose(
+            reference,
+            self.cfg.rewards.carry_torso_pelvis_reference_quat,
+            atol=1.0e-8,
+        )
+
+    def test_waist_reference_deadzone_symmetry_and_monotonicity(self):
+        env = self.make_env(4)
+        expected_names = (
+            "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+        )
+        selected_names = tuple(env.dof_names[index] for index in env.carry_waist_indices)
+        self.assertEqual(selected_names, expected_names)
+        self.assertTrue(set(env.carry_waist_indices.tolist()).isdisjoint(
+            env.carry_arm_indices.tolist()))
+        self.assertTrue(set(env.carry_waist_indices.tolist()).isdisjoint(
+            env.carry_leg_indices.tolist()))
+
+        for axis in range(3):
+            env = self.make_env(4)
+            deadzone = env.carry_waist_reference_deadzone[axis]
+            errors = torch.tensor(
+                [0.5 * deadzone, deadzone + 0.05,
+                 deadzone + 0.20, -(deadzone + 0.05)],
+                dtype=env.dof_pos.dtype,
+            )
+            env.dof_pos[:, env.carry_waist_indices[axis]] += errors
+            reward = self.step(env)["carry_waist_reference"]
+            self.assertEqual(reward[0].item(), 1.0)
+            self.assertGreater(reward[1].item(), reward[2].item())
+            torch.testing.assert_close(reward[1], reward[3])
+
+    def test_torso_pelvis_alignment_so3_properties(self):
+        for axis in range(3):
+            env = self.make_env(4)
+            deadzone = env.carry_torso_pelvis_alignment_deadzone[axis].item()
+            deviations = np.zeros((4, 3))
+            deviations[:, axis] = [0.5 * deadzone, deadzone + 0.05,
+                                   deadzone + 0.20, -(deadzone + 0.05)]
+            delta = torch.tensor(
+                Rotation.from_rotvec(deviations).as_quat(),
+                dtype=env.dof_pos.dtype,
+            )
+            reference = env.carry_torso_pelvis_reference_quat.unsqueeze(
+                0).expand_as(delta)
+            env.rigid_body_states[:, env.carry_torso_index, 3:7] = (
+                self.math_utils.quat_mul(reference, delta))
+            reward = self.step(env)["carry_torso_pelvis_alignment"]
+            self.assertEqual(reward[0].item(), 1.0)
+            self.assertGreater(reward[1].item(), reward[2].item())
+            torch.testing.assert_close(reward[1], reward[3])
+
+        sign = self.make_env(2)
+        sign.rigid_body_states[1, sign.carry_torso_index, 3:7] *= -1.0
+        reward = self.step(sign)["carry_torso_pelvis_alignment"]
+        torch.testing.assert_close(reward, torch.ones_like(reward))
+
+        near_wrap = torch.tensor(
+            Rotation.from_euler("z", [math.pi - 0.01, -math.pi + 0.01]).as_quat(),
+            dtype=torch.float32,
+        )
+        error_quat = self.math_utils.quat_mul(
+            self.math_utils.quat_conjugate(near_wrap[:1]), near_wrap[1:])
+        rotvec = self.quaternion_rotation_vector(error_quat)
+        self.assertAlmostEqual(abs(rotvec[0, 2].item()), 0.02, places=5)
 
     def test_hip_deadzone_monotonicity_and_left_right_symmetry(self):
         env = self.make_env(3)
@@ -270,6 +452,22 @@ class RuntimeRewardTests(unittest.TestCase):
         env.reset_idx(torch.tensor([0]))
         torch.testing.assert_close(env.previous_hand_box[1], previous)
         self.assertAlmostEqual(env.extras["episode"]["carry/hand_slip"].item(), .5, places=5)
+        for name in (
+            "carry/waist_reference_reward",
+            "carry/waist_yaw_error_abs",
+            "carry/waist_roll_error_abs",
+            "carry/waist_pitch_error_abs",
+            "carry/waist_yaw_excess",
+            "carry/waist_roll_excess",
+            "carry/waist_pitch_excess",
+            "carry/torso_pelvis_alignment_reward",
+            "carry/torso_pelvis_rotvec_x_abs",
+            "carry/torso_pelvis_rotvec_y_abs",
+            "carry/torso_pelvis_rotvec_z_abs",
+            "carry/torso_pelvis_alignment_excess",
+        ):
+            self.assertIn(name, env.extras["episode"])
+            self.assertTrue(torch.isfinite(env.extras["episode"][name]))
         # The stub reset moves bodies by 100 m; do not differentiate across it.
         rewards = self.step(env)
         self.assertNotIn("episode", env.extras)
@@ -281,18 +479,22 @@ class RuntimeRewardTests(unittest.TestCase):
 
     def test_rigid_yaw_translation(self):
         env = self.make_env(4)
-        box, hands = env.box_states[:, :3].clone(), env.rigid_body_states[:, 2:4, :3].clone()
+        box = env.box_states[:, :3].clone()
+        body_positions = env.rigid_body_states[:, :, :3].clone()
+        body_orientations = env.rigid_body_states[:, :, 3:7].clone()
         self.step(env)
         for t in range(1, 6):
             q = torch.tensor(Rotation.from_euler("z", [.1*t]*4).as_quat(), dtype=torch.float32)
             shift = torch.tensor([.03*t, -.02*t, 0.])
-            env.rigid_body_states[:, 1, :3] = shift
-            env.rigid_body_states[:, 1, 3:7] = q
+            body_q = q[:, None, :].expand(-1, 8, -1).reshape(-1, 4)
+            env.rigid_body_states[:, :, :3] = self.math_utils.quat_rotate(
+                body_q, body_positions.reshape(-1, 3)).reshape(-1, 8, 3) + shift
+            env.rigid_body_states[:, :, 3:7] = self.math_utils.quat_mul(
+                body_q, body_orientations.reshape(-1, 4)).reshape(-1, 8, 4)
+            env.root_states[:, :3] = shift
+            env.root_states[:, 3:7] = q
             env.box_states[:, :3] = self.math_utils.quat_rotate(q, box) + shift
             env.box_states[:, 3:7] = q
-            env.rigid_body_states[:, 2:4, :3] = self.math_utils.quat_rotate(
-                q[:, None].expand(-1, 2, -1).reshape(-1, 4), hands.reshape(-1, 3)
-            ).reshape(-1, 2, 3) + shift
             for reward in self.step(env).values():
                 torch.testing.assert_close(reward, torch.ones_like(reward))
 

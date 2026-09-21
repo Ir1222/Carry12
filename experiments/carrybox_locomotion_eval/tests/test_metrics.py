@@ -47,6 +47,13 @@ class MetricTests(unittest.TestCase):
             "torso_pelvis_relative_yaw_rad": (.05, .15),
             "torso_pelvis_relative_roll_rad": (.10, .20),
             "torso_pelvis_relative_pitch_rad": (.15, .25),
+            "waist_yaw_error_rad": (.04, .08),
+            "waist_roll_error_rad": (-.03, .09),
+            "waist_pitch_error_rad": (.05, -.15),
+            "torso_pelvis_rotvec_x_error_rad": (.01, .03),
+            "torso_pelvis_rotvec_y_error_rad": (.02, .04),
+            "torso_pelvis_rotvec_z_error_rad": (.03, .05),
+            "torso_pelvis_alignment_error_rad": (.10, .30),
         }
         self.assertEqual(tuple(values), LOWER_BODY_TRACE_METRICS)
         for name, (first, second) in values.items():
@@ -62,10 +69,19 @@ class MetricTests(unittest.TestCase):
         self.assertAlmostEqual(row["feet_width_violation_rate"], .5)
         self.assertAlmostEqual(row["knee_width_violation_rate"], .5)
         self.assertAlmostEqual(row["foot_yaw_error_rms_rad"], math.sqrt(.13))
+        self.assertAlmostEqual(row["waist_yaw_error_rms_rad"], math.sqrt(.004))
+        self.assertAlmostEqual(row["waist_yaw_error_p95_rad"], .078)
+        self.assertAlmostEqual(
+            row["torso_pelvis_alignment_error_rms_rad"], math.sqrt(.05))
+        self.assertAlmostEqual(row["torso_pelvis_alignment_error_p95_rad"], .29)
         mode = aggregate_by_mode([row])[0]
         self.assertAlmostEqual(
             mode["feet_width_violation_rate_mean"], .5)
         self.assertTrue(math.isfinite(mode["waist_yaw_rms_rad_mean"]))
+        self.assertTrue(math.isfinite(
+            mode["waist_yaw_error_p95_rad_mean"]))
+        self.assertTrue(math.isfinite(
+            mode["torso_pelvis_alignment_error_p95_rad_mean"]))
 
     def test_preservation_metrics_include_failed_trials_and_ignore_invalid_motion(self):
         a, b = sample(0.3), sample(0.7)
@@ -81,8 +97,12 @@ class MetricTests(unittest.TestCase):
         self.assertAlmostEqual(row["left_hand_side_error_m_mean"], 0.04)
         self.assertAlmostEqual(row["left_hand_side_error_m_p95"], 0.058)
         self.assertAlmostEqual(row["box_relative_motion_error_mps_mean"], 0.06)
+        self.assertAlmostEqual(row["bilateral_contact_rate"], 1.0)
+        self.assertAlmostEqual(row["hand_slip"], 0.04)
         mode = aggregate_by_mode([row])[0]
         self.assertAlmostEqual(mode["left_hand_side_error_m_mean_mean"], 0.04)
+        self.assertAlmostEqual(mode["bilateral_contact_rate_mean"], 1.0)
+        self.assertAlmostEqual(mode["hand_slip_mean"], 0.04)
         self.assertEqual(mode["completion_rate"], 0.0)
 
     def test_legacy_samples_do_not_fabricate_preservation_metrics(self):

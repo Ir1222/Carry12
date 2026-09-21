@@ -72,9 +72,9 @@ class G1Cfg(CarryBoxCfg):
             carry_leg_range = 0.0
             carry_stance_width = 0.0
 
-            # Waist/torso quantities are diagnostics only in this experiment.
-            carry_waist_posture = 0.0
-            carry_torso_pelvis_alignment = 0.0
+            # Waist bridge: joint-space prior first, body-space sanity check second.
+            carry_waist_reference = 0.4
+            carry_torso_pelvis_alignment = 0.2
             zero_command_stillness = 0.2
 
             lin_vel_z = -1.0
@@ -184,11 +184,36 @@ class G1Cfg(CarryBoxCfg):
         carry_knee_width_range = [0.14, 0.25]
         carry_knee_width_softness = 0.06  # m beyond the interval
 
-        # Explicitly enumerate all three waist joints for diagnostics. The
-        # inherited asset.waist_joints intentionally contains yaw only.
+        # Explicitly enumerate all three waist joints. The inherited
+        # asset.waist_joints intentionally contains yaw only.
         carry_waist_joint_names = [
             "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
         ]
+
+        # Offline calibration over all 773 carrywith1/2/3 frames, using the
+        # verified joint_id.txt order above (rad):
+        #                   min       P05       P50       P95       max
+        # waist yaw     -0.38591  -0.31088  -0.04137   0.21208   0.28050
+        # waist roll    -0.05505  -0.02296   0.03443   0.09357   0.11322
+        # waist pitch    0.13292   0.15598   0.24983   0.36114   0.41958
+        # The dead zones round the pooled P95 absolute residuals outward, so
+        # CarryWith defines a feasible neighborhood rather than an online target.
+        carry_waist_reference_target = [
+            -0.041372441, 0.034433149, 0.249833077,
+        ]
+        carry_waist_reference_deadzone = [0.30, 0.07, 0.12]
+        carry_waist_reference_softness = [0.20, 0.10, 0.12]
+
+        # R_ref = inv(R_pelvis) * R_torso from URDF FK over the same frames.
+        # Quaternion is XYZW with a canonical positive scalar component.
+        # Its XYZ Euler diagnostic is [0.035086, 0.251053, -0.042383] rad.
+        carry_torso_pelvis_reference_quat = [
+            0.020052686, 0.124780931, -0.023215466, 0.991709963,
+        ]
+        # Rotvec XYZ pooled P95 absolute errors are
+        # [0.11596, 0.11539, 0.28046] rad; round outward for a light guardrail.
+        carry_torso_pelvis_alignment_deadzone = [0.12, 0.12, 0.30]
+        carry_torso_pelvis_alignment_softness = [0.12, 0.12, 0.20]
 
         # Box workspace in torso_link coordinates (m), with no preferred center.
         carry_box_relative_position_lower = [0.18, -0.20, -0.15]
