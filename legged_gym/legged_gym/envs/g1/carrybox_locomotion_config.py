@@ -24,10 +24,13 @@ class G1Cfg(CarryBoxCfg):
         curriculum = False
         resampling_time = 0.0
         resample_carry_commands = True
-        carry_command_mode_probabilities = [0.10, 0.15, 0.10, 0.15, 0.50]
+        # Controlled V1 ablation: restore the pre-7115 command distribution so
+        # the first experiment isolates lower-body reward design. This is not
+        # intended to be the final target command distribution.
+        carry_command_mode_probabilities = [0.10, 0.25, 0.15, 0.15, 0.35]
         carry_vx_range = [-0.5, 1.2]
         carry_vy_range = [-0.4, 0.4]
-        carry_yaw_rate_range = [-0.6, 0.6]
+        carry_yaw_rate_range = [-0.5, 0.5]
         carry_mixed_ranges = [
             [-0.4, 0.96],
             [-0.32, 0.32],
@@ -43,13 +46,13 @@ class G1Cfg(CarryBoxCfg):
         class ranges:
             lin_vel_x = [-0.5, 1.2]
             lin_vel_y = [-0.4, 0.4]
-            ang_vel_yaw = [-0.6, 0.6]
+            ang_vel_yaw = [-0.5, 0.5]
             heading = [0.0, 0.0]
 
     class rewards(CarryBoxCfg.rewards):
         class scales:
             carry_lin_vel_tracking = 3.0
-            carry_yaw_vel_tracking = 3.0
+            carry_yaw_vel_tracking = 2.5
 
             carry_bilateral_contact = 0.5
             carry_hand_box_surface = 1.5
@@ -58,8 +61,20 @@ class G1Cfg(CarryBoxCfg):
             carry_relative_position = 0.75
             carry_relative_orientation = 0.0
             carry_arm_range = 0.2
-            carry_leg_range = 0.5
-            carry_stance_width = 0.3
+
+            # Lower-body feasible-family constraints. The broad 12-joint box
+            # and legacy one-sided stance cap are disabled for the clean V1
+            # ablation; their constants remain available as a safety envelope.
+            carry_hip_posture = 0.8
+            carry_foot_heading = 0.35
+            carry_feet_width = 0.30
+            carry_knee_width = 0.20
+            carry_leg_range = 0.0
+            carry_stance_width = 0.0
+
+            # Waist/torso quantities are diagnostics only in this experiment.
+            carry_waist_posture = 0.0
+            carry_torso_pelvis_alignment = 0.0
             zero_command_stillness = 0.2
 
             lin_vel_z = -1.0
@@ -145,10 +160,35 @@ class G1Cfg(CarryBoxCfg):
             0.25, 0.15, 0.20, 0.25, 0.20, 0.15,
         ]  # rad beyond each joint's feasible range
 
-        # Ankle-pitch link separation in pelvis heading coordinates, all clips:
-        # P50/P95/P99/max = 0.1562/0.2503/0.2727/0.2772 m; P99 + 0.03 m.
-        carry_max_feet_lateral_distance = 0.303  # m, rounded up
-        carry_feet_lateral_violation_scale = 0.10  # m beyond the maximum
+        # Focus the posture prior on the four joints that create crab geometry.
+        # Targets are read from default_dof_pos at runtime, not demonstrations.
+        carry_hip_joint_names = [
+            "left_hip_roll_joint", "left_hip_yaw_joint",
+            "right_hip_roll_joint", "right_hip_yaw_joint",
+        ]
+        carry_hip_posture_deadzone = [0.08, 0.10, 0.08, 0.10]  # rad
+        carry_hip_posture_softness = [0.15, 0.15, 0.15, 0.15]  # rad
+
+        carry_foot_links = ["left_ankle_pitch_link", "right_ankle_pitch_link"]
+        carry_knee_links = ["left_knee_link", "right_knee_link"]
+        carry_foot_heading_deadzone = 0.12  # rad relative to pelvis heading
+        carry_foot_heading_softness = 0.20  # rad beyond the dead zone
+
+        # Offline FK over all 773 CarryWith frames, pelvis-heading frame (m):
+        #                 min     P01     P05     P50     P95     P99     max
+        # feet width:   .0754   .0841   .1087   .1562   .2503   .2727   .2772
+        # knee width:   .1471   .1486   .1579   .1928   .2306   .2487   .2524
+        # Feasible intervals are P05/P95 plus about 2 cm engineering margin.
+        carry_feet_width_range = [0.09, 0.27]
+        carry_feet_width_softness = 0.08  # m beyond the interval
+        carry_knee_width_range = [0.14, 0.25]
+        carry_knee_width_softness = 0.06  # m beyond the interval
+
+        # Explicitly enumerate all three waist joints for diagnostics. The
+        # inherited asset.waist_joints intentionally contains yaw only.
+        carry_waist_joint_names = [
+            "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+        ]
 
         # Box workspace in torso_link coordinates (m), with no preferred center.
         carry_box_relative_position_lower = [0.18, -0.20, -0.15]
@@ -227,3 +267,29 @@ class G1CfgPPO(CarryBoxCfgPPO):
         run_name = "loaded_velocity_tracking"
 
     amp = G1Cfg.amp
+
+
+class G1CfgAblationA(G1Cfg):
+    """Current upper body + pre-7115 commands + lower constraints OFF."""
+
+    class rewards(G1Cfg.rewards):
+        class scales(G1Cfg.rewards.scales):
+            carry_hip_posture = 0.0
+            carry_foot_heading = 0.0
+            carry_feet_width = 0.0
+            carry_knee_width = 0.0
+
+
+class G1CfgAblationB(G1CfgAblationA):
+    """Current upper body + current harder commands + lower constraints OFF."""
+
+    class commands(G1Cfg.commands):
+        carry_command_mode_probabilities = [0.10, 0.15, 0.10, 0.15, 0.50]
+        carry_yaw_rate_range = [-0.6, 0.6]
+
+        class ranges(G1Cfg.commands.ranges):
+            ang_vel_yaw = [-0.6, 0.6]
+
+    class rewards(G1CfgAblationA.rewards):
+        class scales(G1CfgAblationA.rewards.scales):
+            carry_yaw_vel_tracking = 3.0

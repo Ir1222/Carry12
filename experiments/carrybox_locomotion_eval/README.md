@@ -15,6 +15,26 @@ Add `--headless` for headless execution. Use `--mode stand|vx|vy|yaw|mixed`
 to run one command family. Replacing only `--resume_path` enables a direct
 comparison with the original Actor.
 
+Run the five command families separately with the same checkpoint and seed:
+
+```bash
+python3 experiments/carrybox_locomotion_eval/evaluator.py --resume_path <checkpoint> --mode stand --output_dir experiments/carrybox_locomotion_eval/results/<label>/stand --save_csv --headless
+python3 experiments/carrybox_locomotion_eval/evaluator.py --resume_path <checkpoint> --mode vx --output_dir experiments/carrybox_locomotion_eval/results/<label>/vx --save_csv --headless
+python3 experiments/carrybox_locomotion_eval/evaluator.py --resume_path <checkpoint> --mode vy --output_dir experiments/carrybox_locomotion_eval/results/<label>/vy --save_csv --headless
+python3 experiments/carrybox_locomotion_eval/evaluator.py --resume_path <checkpoint> --mode yaw --output_dir experiments/carrybox_locomotion_eval/results/<label>/yaw --save_csv --headless
+python3 experiments/carrybox_locomotion_eval/evaluator.py --resume_path <checkpoint> --mode mixed --output_dir experiments/carrybox_locomotion_eval/results/<label>/mixed --save_csv --headless
+```
+
+The causal training variants are registered as tasks without duplicating the
+environment:
+
+- `carrybox_locomotion_ablation_a`: current upper body, pre-7115 commands,
+  lower-body constraints off.
+- `carrybox_locomotion_ablation_b`: current upper body, harder 7115 commands,
+  lower-body constraints off.
+- `carrybox_locomotion`: current upper body, pre-7115 commands, new lower-body
+  constraints on (variant C).
+
 Primary planar velocity is `base_lin_vel_yaw[:, :2]` (pelvis-yaw frame), and
 primary yaw rate is `base_yaw_rate_world` (pelvis world-z angular velocity).
 Box planar velocity is rotated into the same pelvis-yaw frame. Legacy body
@@ -63,3 +83,10 @@ Mode-specific interpretation is: `stand` measures drift/stillness; `vx`
 measures forward tracking plus lateral/yaw leakage; `vy` measures lateral
 tracking plus forward/yaw leakage; `yaw` measures yaw tracking plus translation
 leakage; and `mixed` measures coupled three-DoF tracking.
+
+Lower-body trace columns include signed left/right hip roll/yaw error, feet and
+knee width plus interval violation, signed left/right foot-yaw error, all three
+waist joints, and torso-relative-to-pelvis yaw/roll/pitch. `summary.csv` reduces
+these to hip roll/yaw RMS and absolute P95, feet/knee width mean/P95/violation
+rate, foot-yaw RMS/P95, and waist/torso-pelvis RMS. These are also aggregated by
+command family in `mode_summary.csv`.

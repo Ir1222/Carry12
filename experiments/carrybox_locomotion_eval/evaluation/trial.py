@@ -8,7 +8,10 @@ from isaacgym.torch_utils import quat_rotate_inverse
 from legged_gym.utils.torch_utils import calc_heading_quat
 
 from .inference import assert_observation_compatibility
-from .metrics import PRESERVATION_METRICS, TRACKING_SCALES, summarize_trial
+from .metrics import (
+    LOWER_BODY_TRACE_METRICS, PRESERVATION_METRICS, TRACKING_SCALES,
+    summarize_trial,
+)
 
 
 TRACE_FIELDS = (
@@ -26,7 +29,7 @@ TRACE_FIELDS = (
     "base_yaw", "carry_heading_ref", "carry_heading_error",
     "legacy_body_vx", "legacy_body_vy", "legacy_body_yaw_rate",
     "action_delta_rms", "action_rate_rms", "torque_rms", "feet_slip",
-) + PRESERVATION_METRICS
+) + PRESERVATION_METRICS + LOWER_BODY_TRACE_METRICS
 
 
 def duration_steps(seconds, policy_dt, *, allow_zero=False):
@@ -67,6 +70,29 @@ def _carry_sample(env, previous_hand_box=None, previous_box_pos=None):
         "box_relative_region_violation_m": position_error.norm().item(),
         "box_relative_motion_error_mps": speed,
     }
+    hip = env.carry_hip_error[0]
+    foot_heading = env.carry_foot_heading_error[0]
+    waist = env.dof_pos[0, env.carry_waist_indices]
+    torso_rpy = env.carry_torso_pelvis_rpy[0]
+    metrics.update({
+        "left_hip_roll_error_rad": hip[0].item(),
+        "right_hip_roll_error_rad": hip[2].item(),
+        "left_hip_yaw_error_rad": hip[1].item(),
+        "right_hip_yaw_error_rad": hip[3].item(),
+        "feet_width_m": env.carry_feet_width[0].item(),
+        "feet_width_violation_m": env.carry_feet_width_violation[0].item(),
+        "knee_width_m": env.carry_knee_width[0].item(),
+        "knee_width_violation_m": env.carry_knee_width_violation[0].item(),
+        "left_foot_yaw_error_rad": foot_heading[0].item(),
+        "right_foot_yaw_error_rad": foot_heading[1].item(),
+        "foot_heading_violation_rad": env.carry_foot_heading_excess[0].mean().item(),
+        "waist_yaw_rad": waist[0].item(),
+        "waist_roll_rad": waist[1].item(),
+        "waist_pitch_rad": waist[2].item(),
+        "torso_pelvis_relative_yaw_rad": torso_rpy[2].item(),
+        "torso_pelvis_relative_roll_rad": torso_rpy[0].item(),
+        "torso_pelvis_relative_pitch_rad": torso_rpy[1].item(),
+    })
     return metrics, hand_box, box_pos
 
 

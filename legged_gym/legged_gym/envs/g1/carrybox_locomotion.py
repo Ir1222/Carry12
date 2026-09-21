@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from isaacgym.torch_utils import (
-    quat_rotate_inverse, torch_rand_float,
+    quat_conjugate, quat_mul, quat_rotate_inverse, torch_rand_float,
 )
 from legged_gym.utils.helpers import class_to_dict
 from legged_gym.utils.math import wrap_to_pi
@@ -23,6 +23,49 @@ def range_violation(value, lower, upper):
 def constraint_reward(normalized_violation):
     """C1 dead-zone reward: 1/(1+sum(excess/softness)^2), no Gaussian."""
     return 1.0 / (1.0 + normalized_violation.flatten(1).square().sum(-1))
+
+
+def deadzone_gaussian_reward(error, deadzone, softness):
+    """Bounded reward with a flat feasible dead zone and Gaussian falloff."""
+    excess = (error.abs() - deadzone).clamp_min(0.0)
+    return torch.exp(-torch.mean((excess / softness).square(), dim=-1))
+
+
+def interval_gaussian_reward(value, lower, upper, softness):
+    """Bounded reward equal to one throughout a closed feasible interval."""
+    excess = range_violation(value, lower, upper)
+    return torch.exp(-(excess / softness).square())
+
+
+def quaternion_projected_heading(quaternion):
+    """Heading of the quaternion's forward axis projected onto world XY."""
+    quaternion = quaternion / quaternion.norm(dim=-1, keepdim=True).clamp_min(1.0e-12)
+    x, y, z, w = quaternion.unbind(-1)
+    forward_x = 1.0 - 2.0 * (y.square() + z.square())
+    forward_y = 2.0 * (x * y + w * z)
+    return torch.atan2(forward_y, forward_x)
+
+
+def relative_projected_heading(orientations, reference_orientation):
+    """Wrapped heading difference for one or more bodies per environment."""
+    reference_heading = quaternion_projected_heading(reference_orientation)
+    if orientations.ndim == reference_orientation.ndim + 1:
+        reference_heading = reference_heading.unsqueeze(-1)
+    return wrap_to_pi(
+        quaternion_projected_heading(orientations) - reference_heading
+    )
+
+
+def quaternion_to_rpy(quaternion):
+    """Convert normalized XYZW quaternions to wrapped XYZ Euler diagnostics."""
+    quaternion = quaternion / quaternion.norm(dim=-1, keepdim=True).clamp_min(1.0e-12)
+    x, y, z, w = quaternion.unbind(-1)
+    roll = torch.atan2(2.0 * (w * x + y * z),
+                       1.0 - 2.0 * (x.square() + y.square()))
+    pitch = torch.asin((2.0 * (w * y - z * x)).clamp(-1.0, 1.0))
+    yaw = torch.atan2(2.0 * (w * z + x * y),
+                      1.0 - 2.0 * (y.square() + z.square()))
+    return torch.stack((roll, pitch, yaw), dim=-1)
 
 
 class LeggedRobot(CarryBoxBase):
@@ -102,12 +145,63 @@ class LeggedRobot(CarryBoxBase):
             raise ValueError("Carry leg names, bounds and softness must each have 12 entries")
         if not torch.all(self.carry_leg_range_lower < self.carry_leg_range_upper) or not torch.all(self.carry_leg_violation_scale > 0):
             raise ValueError("Carry leg bounds must be ordered and softness positive")
+
+        self.carry_hip_indices = torch.tensor(
+            [self.dof_names.index(name) for name in rewards.carry_hip_joint_names],
+            device=self.device, dtype=torch.long,
+        )
+        self.carry_hip_target = self.default_dof_pos[self.carry_hip_indices].clone()
+        self.carry_hip_deadzone = self.dof_pos.new_tensor(
+            rewards.carry_hip_posture_deadzone)
+        self.carry_hip_softness = self.dof_pos.new_tensor(
+            rewards.carry_hip_posture_softness)
+        self.carry_foot_indices = torch.tensor(
+            [body_index(name) for name in rewards.carry_foot_links],
+            device=self.device, dtype=torch.long,
+        )
+        self.carry_knee_indices = torch.tensor(
+            [body_index(name) for name in rewards.carry_knee_links],
+            device=self.device, dtype=torch.long,
+        )
+        self.carry_waist_indices = torch.tensor(
+            [self.dof_names.index(name) for name in rewards.carry_waist_joint_names],
+            device=self.device, dtype=torch.long,
+        )
+        self.carry_feet_width_range = self.dof_pos.new_tensor(
+            rewards.carry_feet_width_range)
+        self.carry_knee_width_range = self.dof_pos.new_tensor(
+            rewards.carry_knee_width_range)
+        self.carry_foot_heading_deadzone = self.dof_pos.new_full(
+            (2,), rewards.carry_foot_heading_deadzone)
+        self.carry_foot_heading_softness = self.dof_pos.new_full(
+            (2,), rewards.carry_foot_heading_softness)
+        if any(t.shape != (4,) for t in (
+            self.carry_hip_indices, self.carry_hip_target,
+            self.carry_hip_deadzone, self.carry_hip_softness,
+        )):
+            raise ValueError("Carry hip names, targets, dead zones and softness must have four entries")
+        if self.carry_foot_indices.shape != (2,) or self.carry_knee_indices.shape != (2,):
+            raise ValueError("Carry foot and knee link lists must contain left and right entries")
+        if self.carry_waist_indices.shape != (3,):
+            raise ValueError("Carry waist diagnostics require yaw, roll and pitch joints")
+        if (not torch.all(self.carry_hip_deadzone >= 0)
+                or not torch.all(self.carry_hip_softness > 0)
+                or not torch.all(self.carry_foot_heading_softness > 0)
+                or rewards.carry_foot_heading_deadzone < 0
+                or rewards.carry_feet_width_softness <= 0
+                or rewards.carry_knee_width_softness <= 0
+                or not torch.all(self.carry_feet_width_range[0] < self.carry_feet_width_range[1])
+                or not torch.all(self.carry_knee_width_range[0] < self.carry_knee_width_range[1])):
+            raise ValueError("Carry lower-body dead zones, softness and intervals are invalid")
+
         self.previous_hand_box = self.dof_pos.new_zeros(self.num_envs, 2, 3)
         self.previous_box_relative_pos = self.dof_pos.new_zeros(self.num_envs, 3)
         self.carry_history_valid = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         # Episode aggregates; count actual steps, not randomized episode ages.
         self.carry_log_sums = self.dof_pos.new_zeros(self.num_envs, 9)
         self.carry_log_steps = self.dof_pos.new_zeros(self.num_envs, 2)  # all / valid temporal
+        self.carry_lower_log_sums = self.dof_pos.new_zeros(self.num_envs, 25)
+        self.carry_lower_log_steps = self.dof_pos.new_zeros(self.num_envs)
 
     def _reset_actors(self, env_ids):
         """Reset robot state from one coherent CarryWith reference frame."""
@@ -225,8 +319,44 @@ class LeggedRobot(CarryBoxBase):
             "carry/stance_width": means[7],
             "carry/stance_width_violation": means[8],
         })
+        lower_count = self.carry_lower_log_steps[env_ids].sum()
+        lower_sums = self.carry_lower_log_sums[env_ids].sum(0)
+        lower_means = torch.where(
+            lower_count > 0,
+            lower_sums / lower_count.clamp_min(1),
+            torch.full_like(lower_sums, float("nan")),
+        )
+        self.extras["episode"].update({
+            "carry/hip_roll_abs_mean": lower_means[0],
+            "carry/hip_yaw_abs_mean": lower_means[1],
+            "carry/left_hip_roll_abs": lower_means[2],
+            "carry/right_hip_roll_abs": lower_means[3],
+            "carry/left_hip_yaw_abs": lower_means[4],
+            "carry/right_hip_yaw_abs": lower_means[5],
+            "carry/feet_width_mean": lower_means[6],
+            "carry/feet_width_violation": lower_means[7],
+            "carry/knee_width_mean": lower_means[8],
+            "carry/knee_width_violation": lower_means[9],
+            "carry/left_foot_yaw_error": lower_means[10],
+            "carry/right_foot_yaw_error": lower_means[11],
+            "carry/foot_heading_violation": lower_means[12],
+            "carry/waist_yaw_abs": lower_means[13],
+            "carry/waist_roll_abs": lower_means[14],
+            "carry/waist_pitch_abs": lower_means[15],
+            "carry/waist_yaw_rms": lower_means[16].clamp_min(0.0).sqrt(),
+            "carry/waist_roll_rms": lower_means[17].clamp_min(0.0).sqrt(),
+            "carry/waist_pitch_rms": lower_means[18].clamp_min(0.0).sqrt(),
+            "carry/torso_pelvis_relative_yaw_abs": lower_means[19],
+            "carry/torso_pelvis_relative_roll_abs": lower_means[20],
+            "carry/torso_pelvis_relative_pitch_abs": lower_means[21],
+            "carry/torso_pelvis_relative_yaw_rms": lower_means[22].clamp_min(0.0).sqrt(),
+            "carry/torso_pelvis_relative_roll_rms": lower_means[23].clamp_min(0.0).sqrt(),
+            "carry/torso_pelvis_relative_pitch_rms": lower_means[24].clamp_min(0.0).sqrt(),
+        })
         self.carry_log_sums[env_ids] = 0.0
         self.carry_log_steps[env_ids] = 0.0
+        self.carry_lower_log_sums[env_ids] = 0.0
+        self.carry_lower_log_steps[env_ids] = 0.0
         self.carry_history_valid[env_ids] = False
         self.carry_policy_commands[env_ids, :3] = self.commands[env_ids, :3]
         self.is_stage_carry[env_ids] = True
@@ -409,6 +539,73 @@ class LeggedRobot(CarryBoxBase):
         self.box_relative_velocity[~self.carry_history_valid] = 0.0
         self.previous_hand_box.copy_(self.hand_box)
         self.previous_box_relative_pos.copy_(self.box_relative_pos)
+        self._update_lower_body_state(torso)
+
+    def _update_lower_body_state(self, torso):
+        """Cache lower-body geometry and diagnostics once per policy step."""
+        pelvis_quat = self.root_states[:, 3:7]
+        heading_quat = calc_heading_quat(pelvis_quat)
+
+        self.carry_hip_error = (
+            self.dof_pos[:, self.carry_hip_indices] - self.carry_hip_target
+        )
+
+        feet = self.rigid_body_states[:, self.carry_foot_indices]
+        knees = self.rigid_body_states[:, self.carry_knee_indices]
+        feet_separation = quat_rotate_inverse(
+            heading_quat, feet[:, 0, :3] - feet[:, 1, :3])
+        knee_separation = quat_rotate_inverse(
+            heading_quat, knees[:, 0, :3] - knees[:, 1, :3])
+        self.carry_feet_width = feet_separation[:, 1].abs()
+        self.carry_knee_width = knee_separation[:, 1].abs()
+        self.carry_feet_width_violation = range_violation(
+            self.carry_feet_width,
+            self.carry_feet_width_range[0], self.carry_feet_width_range[1],
+        )
+        self.carry_knee_width_violation = range_violation(
+            self.carry_knee_width,
+            self.carry_knee_width_range[0], self.carry_knee_width_range[1],
+        )
+        leg_range_excess = range_violation(
+            self.dof_pos[:, self.carry_leg_indices],
+            self.carry_leg_range_lower, self.carry_leg_range_upper,
+        )
+        self.carry_log_sums[:, 6] += leg_range_excess.mean(-1)
+        self.carry_log_sums[:, 7] += self.carry_feet_width
+        self.carry_log_sums[:, 8] += self.carry_feet_width_violation
+
+        self.carry_foot_heading_error = relative_projected_heading(
+            feet[:, :, 3:7], pelvis_quat)
+        self.carry_foot_heading_excess = (
+            self.carry_foot_heading_error.abs() - self.carry_foot_heading_deadzone
+        ).clamp_min(0.0)
+
+        waist = self.dof_pos[:, self.carry_waist_indices]
+        relative_torso_quat = quat_mul(
+            quat_conjugate(pelvis_quat), torso[:, 3:7])
+        self.carry_torso_pelvis_rpy = quaternion_to_rpy(relative_torso_quat)
+
+        hip_abs = self.carry_hip_error.abs()
+        foot_heading_abs = self.carry_foot_heading_error.abs()
+        waist_abs = waist.abs()
+        torso_abs = self.carry_torso_pelvis_rpy.abs()
+        self.carry_lower_log_sums += torch.stack((
+            hip_abs[:, [0, 2]].mean(-1),
+            hip_abs[:, [1, 3]].mean(-1),
+            hip_abs[:, 0], hip_abs[:, 2],
+            hip_abs[:, 1], hip_abs[:, 3],
+            self.carry_feet_width, self.carry_feet_width_violation,
+            self.carry_knee_width, self.carry_knee_width_violation,
+            foot_heading_abs[:, 0], foot_heading_abs[:, 1],
+            self.carry_foot_heading_excess.mean(-1),
+            waist_abs[:, 0], waist_abs[:, 1], waist_abs[:, 2],
+            waist[:, 0].square(), waist[:, 1].square(), waist[:, 2].square(),
+            torso_abs[:, 2], torso_abs[:, 0], torso_abs[:, 1],
+            self.carry_torso_pelvis_rpy[:, 2].square(),
+            self.carry_torso_pelvis_rpy[:, 0].square(),
+            self.carry_torso_pelvis_rpy[:, 1].square(),
+        ), dim=-1)
+        self.carry_lower_log_steps += 1
 
     def _reward_carry_hand_box_surface(self):
         c = self.cfg.rewards
@@ -448,25 +645,44 @@ class LeggedRobot(CarryBoxBase):
         self.carry_log_sums[:, 3] += excess.amax(-1)
         return constraint_reward(excess / self.cfg.rewards.carry_arm_violation_scale)
 
+    def _reward_carry_hip_posture(self):
+        return deadzone_gaussian_reward(
+            self.carry_hip_error, self.carry_hip_deadzone,
+            self.carry_hip_softness,
+        )
+
+    def _reward_carry_foot_heading(self):
+        return deadzone_gaussian_reward(
+            self.carry_foot_heading_error,
+            self.carry_foot_heading_deadzone,
+            self.carry_foot_heading_softness,
+        )
+
+    def _reward_carry_feet_width(self):
+        c = self.cfg.rewards
+        return interval_gaussian_reward(
+            self.carry_feet_width,
+            self.carry_feet_width_range[0], self.carry_feet_width_range[1],
+            c.carry_feet_width_softness,
+        )
+
+    def _reward_carry_knee_width(self):
+        c = self.cfg.rewards
+        return interval_gaussian_reward(
+            self.carry_knee_width,
+            self.carry_knee_width_range[0], self.carry_knee_width_range[1],
+            c.carry_knee_width_softness,
+        )
+
     def _reward_carry_leg_range(self):
         excess = range_violation(self.dof_pos[:, self.carry_leg_indices],
                                  self.carry_leg_range_lower, self.carry_leg_range_upper)
-        self.carry_log_sums[:, 6] += excess.mean(-1)  # mean joint excess, rad
         return constraint_reward(excess / self.carry_leg_violation_scale)
 
     def _reward_carry_stance_width(self):
-        c = self.cfg.rewards
-        # feet_indices are the two ankle_pitch links, matching MotionLib.
-        # Rotating their difference cancels pelvis translation and gives the
-        # same lateral separation as transforming both feet into its yaw frame.
-        feet = self.rigid_body_states[:, self.feet_indices, :3]
-        separation = quat_rotate_inverse(
-            calc_heading_quat(self.root_states[:, 3:7]), feet[:, 0] - feet[:, 1])
-        width = separation[:, 1].abs()
-        excess = (width - c.carry_max_feet_lateral_distance).clamp_min(0.0)
-        self.carry_log_sums[:, 7] += width
-        self.carry_log_sums[:, 8] += excess
-        return constraint_reward((excess / c.carry_feet_lateral_violation_scale).unsqueeze(-1))
+        # Compatibility alias for old configs. V1 sets this scale to zero so it
+        # cannot double-count the new two-sided feasible interval.
+        return self._reward_carry_feet_width()
 
     def _reward_zero_command_stillness(self):
         stillness = torch.exp(

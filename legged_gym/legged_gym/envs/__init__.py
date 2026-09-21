@@ -38,7 +38,11 @@ from .g1.carrybox_config import G1Cfg as G1CarryBoxCfg
 from .g1.carrybox_config import G1CfgPPO as G1CarryBoxCfgPPO
 
 from .g1.carrybox_locomotion import LeggedRobot as G1CarryBoxLocomotion
-from .g1.carrybox_locomotion_config import G1Cfg as G1CarryBoxLocomotionCfg
+from .g1.carrybox_locomotion_config import (
+    G1Cfg as G1CarryBoxLocomotionCfg,
+    G1CfgAblationA as G1CarryBoxLocomotionAblationACfg,
+    G1CfgAblationB as G1CarryBoxLocomotionAblationBCfg,
+)
 from .g1.carrybox_locomotion_config import G1CfgPPO as G1CarryBoxLocomotionCfgPPO
 
 from .g1.carrybox_resume_config import G1Cfg as G1CarryBoxResumeCfg
@@ -57,6 +61,18 @@ task_registry.register(
     "carrybox_locomotion",
     G1CarryBoxLocomotion,
     G1CarryBoxLocomotionCfg(),
+    G1CarryBoxLocomotionCfgPPO(),
+)
+task_registry.register(
+    "carrybox_locomotion_ablation_a",
+    G1CarryBoxLocomotion,
+    G1CarryBoxLocomotionAblationACfg(),
+    G1CarryBoxLocomotionCfgPPO(),
+)
+task_registry.register(
+    "carrybox_locomotion_ablation_b",
+    G1CarryBoxLocomotion,
+    G1CarryBoxLocomotionAblationBCfg(),
     G1CarryBoxLocomotionCfgPPO(),
 )
 task_registry.register( "carrybox_resume", G1CarryBox, G1CarryBoxResumeCfg(), G1CarryBoxResumeCfgPPO() )

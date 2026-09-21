@@ -21,6 +21,31 @@ PRESERVATION_METRICS = (
     "box_relative_motion_error_mps",
 )
 
+LOWER_BODY_TRACE_METRICS = (
+    "left_hip_roll_error_rad", "right_hip_roll_error_rad",
+    "left_hip_yaw_error_rad", "right_hip_yaw_error_rad",
+    "feet_width_m", "feet_width_violation_m",
+    "knee_width_m", "knee_width_violation_m",
+    "left_foot_yaw_error_rad", "right_foot_yaw_error_rad",
+    "foot_heading_violation_rad",
+    "waist_yaw_rad", "waist_roll_rad", "waist_pitch_rad",
+    "torso_pelvis_relative_yaw_rad",
+    "torso_pelvis_relative_roll_rad",
+    "torso_pelvis_relative_pitch_rad",
+)
+
+LOWER_BODY_SUMMARY_METRICS = (
+    "hip_roll_rms_rad", "hip_roll_p95_rad",
+    "hip_yaw_rms_rad", "hip_yaw_p95_rad",
+    "feet_width_mean_m", "feet_width_p95_m", "feet_width_violation_rate",
+    "knee_width_mean_m", "knee_width_p95_m", "knee_width_violation_rate",
+    "foot_yaw_error_rms_rad", "foot_yaw_error_p95_rad",
+    "waist_yaw_rms_rad", "waist_roll_rms_rad", "waist_pitch_rms_rad",
+    "torso_pelvis_relative_yaw_rms_rad",
+    "torso_pelvis_relative_roll_rms_rad",
+    "torso_pelvis_relative_pitch_rms_rad",
+)
+
 
 def mean(values):
     values = list(values)
@@ -50,6 +75,11 @@ def wrapped_angle(angle):
 
 def _values(samples, key):
     return [float(sample[key]) for sample in samples]
+
+
+def _available_values(samples, key):
+    return [float(sample[key]) for sample in samples
+            if key in sample and math.isfinite(float(sample[key]))]
 
 
 def _axis_metrics(samples, axis):
@@ -190,6 +220,41 @@ def summarize_trial(condition, samples, *, policy_dt, requested_steps,
                   if name in sample and math.isfinite(float(sample[name]))]
         row[name + "_mean"] = mean(values)
         row[name + "_p95"] = percentile(values, 95.0)
+
+    hip_roll = (
+        _available_values(samples, "left_hip_roll_error_rad")
+        + _available_values(samples, "right_hip_roll_error_rad")
+    )
+    hip_yaw = (
+        _available_values(samples, "left_hip_yaw_error_rad")
+        + _available_values(samples, "right_hip_yaw_error_rad")
+    )
+    foot_yaw = (
+        _available_values(samples, "left_foot_yaw_error_rad")
+        + _available_values(samples, "right_foot_yaw_error_rad")
+    )
+    feet_width = _available_values(samples, "feet_width_m")
+    knee_width = _available_values(samples, "knee_width_m")
+    feet_violation = _available_values(samples, "feet_width_violation_m")
+    knee_violation = _available_values(samples, "knee_width_violation_m")
+    row.update({
+        "hip_roll_rms_rad": rms(hip_roll),
+        "hip_roll_p95_rad": percentile((abs(v) for v in hip_roll), 95.0),
+        "hip_yaw_rms_rad": rms(hip_yaw),
+        "hip_yaw_p95_rad": percentile((abs(v) for v in hip_yaw), 95.0),
+        "feet_width_mean_m": mean(feet_width),
+        "feet_width_p95_m": percentile(feet_width, 95.0),
+        "feet_width_violation_rate": mean(v > 0.0 for v in feet_violation),
+        "knee_width_mean_m": mean(knee_width),
+        "knee_width_p95_m": percentile(knee_width, 95.0),
+        "knee_width_violation_rate": mean(v > 0.0 for v in knee_violation),
+        "foot_yaw_error_rms_rad": rms(foot_yaw),
+        "foot_yaw_error_p95_rad": percentile((abs(v) for v in foot_yaw), 95.0),
+    })
+    for prefix in ("waist", "torso_pelvis_relative"):
+        for axis in ("yaw", "roll", "pitch"):
+            values = _available_values(samples, f"{prefix}_{axis}_rad")
+            row[f"{prefix}_{axis}_rms_rad"] = rms(values)
     return row
 
 
@@ -205,7 +270,8 @@ COMMON_INTEGRITY_METRICS = (
     "box_tilt_max_deg",
     "robot_box_relative_linear_velocity_norm_mean",
     "robot_box_relative_linear_velocity_norm_p95",
-) + tuple(name + suffix for name in PRESERVATION_METRICS for suffix in ("_mean", "_p95"))
+) + tuple(name + suffix for name in PRESERVATION_METRICS for suffix in ("_mean", "_p95")) \
+    + LOWER_BODY_SUMMARY_METRICS
 
 # Keep the mode summary focused on the behavior each command family probes.
 # The union is emitted as a stable CSV schema; non-applicable columns are NaN.

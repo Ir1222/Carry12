@@ -3,7 +3,8 @@ import unittest
 
 from experiments.carrybox_locomotion_eval.evaluation.command_suite import CommandCondition
 from experiments.carrybox_locomotion_eval.evaluation.metrics import (
-    PRESERVATION_METRICS, aggregate_by_mode, summarize_trial,
+    LOWER_BODY_TRACE_METRICS, PRESERVATION_METRICS, aggregate_by_mode,
+    summarize_trial,
 )
 
 
@@ -26,6 +27,46 @@ def sample(vx):
 
 
 class MetricTests(unittest.TestCase):
+    def test_lower_body_metrics_are_reduced_per_command_family(self):
+        a, b = sample(0.3), sample(0.7)
+        values = {
+            "left_hip_roll_error_rad": (.1, .3),
+            "right_hip_roll_error_rad": (-.1, -.3),
+            "left_hip_yaw_error_rad": (.2, .4),
+            "right_hip_yaw_error_rad": (-.2, -.4),
+            "feet_width_m": (.18, .30),
+            "feet_width_violation_m": (0.0, .03),
+            "knee_width_m": (.19, .26),
+            "knee_width_violation_m": (0.0, .01),
+            "left_foot_yaw_error_rad": (.1, .5),
+            "right_foot_yaw_error_rad": (-.1, -.5),
+            "foot_heading_violation_rad": (0.0, .38),
+            "waist_yaw_rad": (.1, .3),
+            "waist_roll_rad": (.2, .4),
+            "waist_pitch_rad": (.3, .5),
+            "torso_pelvis_relative_yaw_rad": (.05, .15),
+            "torso_pelvis_relative_roll_rad": (.10, .20),
+            "torso_pelvis_relative_pitch_rad": (.15, .25),
+        }
+        self.assertEqual(tuple(values), LOWER_BODY_TRACE_METRICS)
+        for name, (first, second) in values.items():
+            a[name], b[name] = first, second
+        row = summarize_trial(
+            CommandCondition("T0001", "mixed", .5, .1, .2, 1, 0, .5),
+            [a, b], policy_dt=.02, requested_steps=2, executed_steps=2,
+            termination_reason="completed",
+        )
+        self.assertAlmostEqual(row["hip_roll_rms_rad"], math.sqrt(.05))
+        self.assertAlmostEqual(row["hip_yaw_rms_rad"], math.sqrt(.10))
+        self.assertAlmostEqual(row["feet_width_mean_m"], .24)
+        self.assertAlmostEqual(row["feet_width_violation_rate"], .5)
+        self.assertAlmostEqual(row["knee_width_violation_rate"], .5)
+        self.assertAlmostEqual(row["foot_yaw_error_rms_rad"], math.sqrt(.13))
+        mode = aggregate_by_mode([row])[0]
+        self.assertAlmostEqual(
+            mode["feet_width_violation_rate_mean"], .5)
+        self.assertTrue(math.isfinite(mode["waist_yaw_rms_rad_mean"]))
+
     def test_preservation_metrics_include_failed_trials_and_ignore_invalid_motion(self):
         a, b = sample(0.3), sample(0.7)
         for name in PRESERVATION_METRICS:
