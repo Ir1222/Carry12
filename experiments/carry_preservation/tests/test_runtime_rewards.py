@@ -117,11 +117,12 @@ class RuntimeRewardTests(unittest.TestCase):
         env.num_envs, env.device, env.dt = n, "cpu", 0.02
         env.cfg = types.SimpleNamespace(rewards=self.cfg.rewards)
         env.dof_names = list(self.cfg.init_state.default_joint_angles)
+        env.num_dof = len(env.dof_names)
         env.dof_pos = torch.zeros(n, 29, dtype=dtype)
-        env.default_dof_pos = env.dof_pos.new_tensor([
+        env.default_dof_pos = env.dof_pos.new_tensor([[
             self.cfg.init_state.default_joint_angles[name]
             for name in env.dof_names
-        ])
+        ]])
         body_indices = {
             "torso_link": 1,
             "left_palm_link": 2, "right_palm_link": 3,
@@ -371,6 +372,12 @@ class RuntimeRewardTests(unittest.TestCase):
 
     def test_hip_deadzone_monotonicity_and_left_right_symmetry(self):
         env = self.make_env(3)
+        self.assertEqual(env.default_dof_pos.shape, (1, 29))
+        self.assertEqual(env.carry_hip_target.shape, (4,))
+        torch.testing.assert_close(
+            env.carry_hip_target,
+            env.default_dof_pos[0, env.carry_hip_indices],
+        )
         target = env.carry_hip_target[1]
         env.dof_pos[:, env.carry_hip_indices[1]] = target + torch.tensor([.05, .15, .35])
         reward = self.step(env)["carry_hip_posture"]

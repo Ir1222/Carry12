@@ -165,7 +165,17 @@ class LeggedRobot(CarryBoxBase):
             [self.dof_names.index(name) for name in rewards.carry_hip_joint_names],
             device=self.device, dtype=torch.long,
         )
-        self.carry_hip_target = self.default_dof_pos[self.carry_hip_indices].clone()
+        # CarryBoxBase stores the nominal pose as [1, num_dof] for broadcast
+        # against batched environments. Index the DOF dimension explicitly;
+        # indexing dimension 0 with joint ids causes a CUDA device-side assert.
+        if self.default_dof_pos.shape != (1, self.num_dof):
+            raise ValueError(
+                "default_dof_pos must have shape [1, num_dof], got "
+                f"{tuple(self.default_dof_pos.shape)}"
+            )
+        self.carry_hip_target = self.default_dof_pos[
+            0, self.carry_hip_indices
+        ].clone()
         self.carry_hip_deadzone = self.dof_pos.new_tensor(
             rewards.carry_hip_posture_deadzone)
         self.carry_hip_softness = self.dof_pos.new_tensor(
