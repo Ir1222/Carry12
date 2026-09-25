@@ -71,12 +71,21 @@ LOWER_BODY_REWARDS = (
 REWARDS = UPPER_BODY_REWARDS + LOWER_BODY_REWARDS
 
 UPPER_BODY_AST_HASHES = {
-    "_reward_carry_bilateral_contact": "d6e25c5a4057416482f1ef48abf139b85023656b00d8252b7907a3eb8e50426d",
-    "_reward_carry_hand_box_surface": "7704857c00a0d7250fb0a26297b2c00a507bdaccf40e7c8bbf38d6f62c85c402",
-    "_reward_carry_hand_slip": "1325ac1cf23a3917068b46c84ce97879ce1454ca0a2d45ef9cd0159434921c6d",
-    "_reward_carry_relative_velocity": "e152aa929c556cf09abf8b0c9ea2576eeb422d22307076694eee6b700844b50c",
-    "_reward_carry_relative_position": "baedf8f48c2e23a492f74a129c9bdd3e348014212fd3f946fa86e021e0f945b9",
-    "_reward_carry_arm_range": "56f60576c659998fbbc6549d051600aff5f6d45c171dbc2e0d9a1472f2b9d34e",
+    "_reward_carry_bilateral_contact": "37125de79bae0e66f045ac99e5334de019e5e12749132c6c177340abbe882489",
+    "_reward_carry_hand_box_surface": "6a1673d8be182d160730f243ac6cd3c5f56a6f51d9c5b5b8f5968d282ccd5512",
+    "_reward_carry_hand_slip": "70abcdfceef02c78acff1e507838c47ef9fda2ca0b55f57b6f241ae6a454bcab",
+    "_reward_carry_relative_velocity": "d27e0f128dcbbde3208ea402ebe41c6d3ec010fbb44837d4f6d74a2a7e37eeb3",
+    "_reward_carry_relative_position": "892f70b8ca6a152167eeccf835e0faa5a0efd839825ca25e22a24ec0fa8d8a24",
+    "_reward_carry_arm_range": "819431d9d348cf077614dcfde1f97462848f055fbb246bd42b695739c8eaf969",
+}
+
+LOWER_BODY_AST_HASHES = {
+    "_reward_carry_hip_posture": "489f15451c92df7dbf020c475d2e28cdef5511c53485b4f2a715adf9ed66c1b1",
+    "_reward_carry_foot_heading": "911eff5dacdaa08038c48978b16336f3280687ec5ae146863a362bae910136ba",
+    "_reward_carry_feet_width": "3560a419d10598018b25137e13dd0183ada0820686dd76983ae082bee3eec811",
+    "_reward_carry_knee_width": "13fc008c747e068009399ce297cf158460fe6c0a205800d37bfa211dbc23851d",
+    "_reward_carry_waist_reference": "76e79508791e53ead70f05959aa9c0938d03f874acb36e77199f771a4f7de590",
+    "_reward_carry_torso_pelvis_alignment": "5890a48b4b5c53346ea624c675c74195e4a54f79b6740b2a4ad8b137d361aa77",
 }
 
 
@@ -95,6 +104,9 @@ class RuntimeRewardTests(unittest.TestCase):
             quat_rotate_inverse=cls.math_utils.quat_rotate_inverse,
             calc_heading_quat=cls.math_utils.calc_heading_quat,
             wrap_to_pi=lambda angles: torch.atan2(torch.sin(angles), torch.cos(angles)),
+            torch_rand_float=lambda low, high, shape, device: (
+                low + (high - low) * torch.rand(shape, device=device)
+            ),
         )
         parent_path = ROOT / "legged_gym/legged_gym/envs/g1/carrybox.py"
         parent = next(n for n in ast.parse(parent_path.read_text()).body if isinstance(n, ast.ClassDef))
@@ -208,7 +220,7 @@ class RuntimeRewardTests(unittest.TestCase):
         self.assertEqual(self.cfg.env.num_actions, 29)
         self.assertEqual(self.cfg.env.num_dofs, 29)
 
-    def test_v2_reward_scales_and_moderate_commands(self):
+    def test_reward_scales_and_expanded_commands(self):
         expected_scales = {
             "carry_lin_vel_tracking": 3.0,
             "carry_yaw_vel_tracking": 2.5,
@@ -233,18 +245,85 @@ class RuntimeRewardTests(unittest.TestCase):
             self.assertEqual(getattr(self.cfg.rewards.scales, name), expected)
         self.assertEqual(
             self.cfg.commands.carry_command_mode_probabilities,
-            [0.10, 0.25, 0.15, 0.15, 0.35],
+            [0.10, 0.10, 0.10, 0.10, 0.60],
         )
-        self.assertEqual(self.cfg.commands.carry_yaw_rate_range, [-0.5, 0.5])
+        self.assertEqual(sum(self.cfg.commands.carry_command_mode_probabilities), 1.0)
+        expected_ranges = [[-0.6, 1.2], [-0.5, 0.5], [-0.7, 0.7]]
+        self.assertEqual(self.cfg.commands.carry_vx_range, expected_ranges[0])
+        self.assertEqual(self.cfg.commands.carry_vy_range, expected_ranges[1])
+        self.assertEqual(self.cfg.commands.carry_yaw_rate_range, expected_ranges[2])
+        self.assertEqual(self.cfg.commands.carry_mixed_ranges, expected_ranges)
+        self.assertEqual(self.cfg.commands.carry_moving_vx_range, expected_ranges[0])
+        self.assertEqual(self.cfg.commands.ranges.lin_vel_x, expected_ranges[0])
+        self.assertEqual(self.cfg.commands.ranges.lin_vel_y, expected_ranges[1])
+        self.assertEqual(self.cfg.commands.ranges.ang_vel_yaw, expected_ranges[2])
+        self.assertEqual(self.cfg.commands.carry_command_resample_interval_s, [4.0, 6.0])
+        self.assertEqual(self.cfg.rewards.carry_lin_vel_sigma, 0.25)
+        self.assertEqual(self.cfg.rewards.carry_yaw_vel_sigma, 0.25)
 
-    def test_upper_body_reward_implementations_are_unchanged(self):
+    def test_command_sampler_distribution_and_deadzones(self):
+        torch.manual_seed(20260926)
+        count = 100_000
+        env = self.env_type()
+        env.cfg = types.SimpleNamespace(commands=self.cfg.commands)
+        env.device = "cpu"
+        env.commands = torch.empty(count, 4)
+        env.carry_command_mode = torch.empty(count, dtype=torch.long)
+        env._sample_carry_commands(torch.arange(count))
+        command = env.commands[:, :3]
+        modes = env.carry_command_mode
+        for mode, probability in enumerate((0.10, 0.10, 0.10, 0.10, 0.60)):
+            self.assertLess(abs((modes == mode).float().mean().item() - probability), 0.01)
+        torch.testing.assert_close(command[modes == 0], torch.zeros_like(command[modes == 0]))
+        for mode, axis, (low, high) in (
+            (1, 0, (-0.6, 1.2)),
+            (2, 1, (-0.5, 0.5)),
+            (3, 2, (-0.7, 0.7)),
+        ):
+            selected = command[modes == mode]
+            self.assertTrue(bool(((selected[:, axis] >= low) & (selected[:, axis] <= high)).all()))
+            self.assertTrue(bool((selected[:, axis].abs() >= 0.10).all()))
+            other_axes = [index for index in range(3) if index != axis]
+            self.assertTrue(bool((selected[:, other_axes] == 0).all()))
+        vx = command[modes == 1, 0]
+        self.assertLess(abs((vx < 0).float().mean().item() - 0.5 / 1.6), 0.02)
+        mixed = command[modes == 4]
+        for axis, (low, high) in enumerate(((-0.6, 1.2), (-0.5, 0.5), (-0.7, 0.7))):
+            self.assertTrue(bool(((mixed[:, axis] >= low) & (mixed[:, axis] <= high)).all()))
+        moving = (mixed[:, :2].norm(dim=-1) >= 0.10) | (mixed[:, 2].abs() >= 0.10)
+        self.assertTrue(bool(moving.all()))
+        self.assertTrue(bool((mixed[:, 0] < -0.5).any()))
+        self.assertTrue(bool((mixed[:, 1].abs() > 0.4).any()))
+        self.assertTrue(bool((mixed[:, 2].abs() > 0.5).any()))
+
+    def test_mixed_sampler_fails_after_bounded_retries_for_invalid_domain(self):
+        env = self.env_type()
+        env.cfg = types.SimpleNamespace(commands=types.SimpleNamespace(
+            carry_command_mode_probabilities=[0.0, 0.0, 0.0, 0.0, 1.0],
+            carry_vx_range=[-0.6, 1.2],
+            carry_vy_range=[-0.5, 0.5],
+            carry_yaw_rate_range=[-0.7, 0.7],
+            carry_min_moving_vx=0.10,
+            carry_min_moving_vy=0.10,
+            carry_min_moving_yaw=0.10,
+            carry_mixed_ranges=[[-0.01, 0.01]] * 3,
+        ))
+        env.device = "cpu"
+        env.commands = torch.empty(16, 4)
+        env.carry_command_mode = torch.empty(16, dtype=torch.long)
+        with self.assertRaisesRegex(RuntimeError, "four retries"):
+            env._sample_carry_commands(torch.arange(16))
+
+    def test_carry_posture_reward_implementations_are_unchanged(self):
         tree = ast.parse((ROOT / ENV_PATH).read_text())
         actual = {}
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name in UPPER_BODY_AST_HASHES:
+            if isinstance(node, ast.FunctionDef) and node.name in (
+                UPPER_BODY_AST_HASHES | LOWER_BODY_AST_HASHES
+            ):
                 dump = ast.dump(node, include_attributes=False)
                 actual[node.name] = hashlib.sha256(dump.encode()).hexdigest()
-        self.assertEqual(actual, UPPER_BODY_AST_HASHES)
+        self.assertEqual(actual, UPPER_BODY_AST_HASHES | LOWER_BODY_AST_HASHES)
 
     def test_verified_carrywith_waist_calibration_and_joint_order(self):
         mapping_path = ROOT / "legged_gym/resources/config/joint_id.txt"

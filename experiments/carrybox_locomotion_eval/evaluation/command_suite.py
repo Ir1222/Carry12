@@ -7,26 +7,22 @@ from typing import Iterable, List, Sequence, Tuple
 MODES = ("stand", "vx", "vy", "yaw", "mixed")
 TRAINING_MODE_WEIGHTS = {
     "stand": 0.10,
-    "vx": 0.25,
-    "vy": 0.15,
-    "yaw": 0.15,
-    "mixed": 0.35,
+    "vx": 0.10,
+    "vy": 0.10,
+    "yaw": 0.10,
+    "mixed": 0.60,
 }
 
-VX_VALUES = (-0.50, -0.25, 0.10, 0.40, 0.90, 1.20)
-VY_VALUES = (-0.40, -0.20, -0.10, 0.10, 0.20, 0.40)
-YAW_VALUES = (-0.50, -0.25, -0.10, 0.10, 0.25, 0.50)
+VX_VALUES = (-0.60, -0.35, -0.15, 0.15, 0.40, 0.80, 1.20)
+VY_VALUES = (-0.50, -0.30, -0.15, 0.15, 0.30, 0.50)
+YAW_VALUES = (-0.70, -0.45, -0.20, 0.20, 0.45, 0.70)
 
 FULL_RANGES = {
-    "vx": (-0.50, 1.20),
-    "vy": (-0.40, 0.40),
-    "yaw_rate": (-0.50, 0.50),
+    "vx": (-0.60, 1.20),
+    "vy": (-0.50, 0.50),
+    "yaw_rate": (-0.70, 0.70),
 }
-MIXED_RANGES = {
-    "vx": (-0.40, 0.96),
-    "vy": (-0.32, 0.32),
-    "yaw_rate": (-0.40, 0.40),
-}
+MIXED_RANGES = FULL_RANGES.copy()
 
 
 @dataclass(frozen=True)
@@ -39,6 +35,7 @@ class CommandCondition:
     seed: int
     carry_motion_id: int
     carry_phase: float
+    case_type: str = "axis"
 
     def as_row(self):
         return asdict(self)
@@ -60,7 +57,7 @@ def _scale(unit_value: float, value_range: Tuple[float, float]) -> float:
 
 
 def mixed_commands() -> List[Tuple[float, float, float]]:
-    """Return 24 fixed commands: all eight corners plus 16 Halton points."""
+    """Return 32 fixed commands: all eight corners plus 24 Halton points."""
     vx = MIXED_RANGES["vx"]
     vy = MIXED_RANGES["vy"]
     yaw = MIXED_RANGES["yaw_rate"]
@@ -76,21 +73,21 @@ def mixed_commands() -> List[Tuple[float, float, float]]:
             _scale(_radical_inverse(i, 3), vy),
             _scale(_radical_inverse(i, 5), yaw),
         )
-        for i in range(1, 17)
+        for i in range(1, 25)
     ]
     return corners + interior
 
 
-def _raw_commands() -> Iterable[Tuple[str, float, float, float]]:
-    yield "stand", 0.0, 0.0, 0.0
+def _raw_commands() -> Iterable[Tuple[str, float, float, float, str]]:
+    yield "stand", 0.0, 0.0, 0.0, "stand"
     for value in VX_VALUES:
-        yield "vx", value, 0.0, 0.0
+        yield "vx", value, 0.0, 0.0, "axis"
     for value in VY_VALUES:
-        yield "vy", 0.0, value, 0.0
+        yield "vy", 0.0, value, 0.0, "axis"
     for value in YAW_VALUES:
-        yield "yaw", 0.0, 0.0, value
-    for vx, vy, yaw_rate in mixed_commands():
-        yield "mixed", vx, vy, yaw_rate
+        yield "yaw", 0.0, 0.0, value, "axis"
+    for index, (vx, vy, yaw_rate) in enumerate(mixed_commands()):
+        yield "mixed", vx, vy, yaw_rate, "corner" if index < 8 else "interior"
 
 
 def build_command_suite(
@@ -105,7 +102,7 @@ def build_command_suite(
     if unknown:
         raise ValueError(f"Unknown command modes: {sorted(unknown)}")
     conditions = []
-    for mode, vx, vy, yaw_rate in _raw_commands():
+    for mode, vx, vy, yaw_rate, case_type in _raw_commands():
         if mode not in selected:
             continue
         conditions.append(
@@ -118,6 +115,7 @@ def build_command_suite(
                 seed=int(seed),
                 carry_motion_id=int(carry_motion_id),
                 carry_phase=float(carry_phase),
+                case_type=case_type,
             )
         )
     return conditions

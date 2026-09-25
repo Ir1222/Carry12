@@ -24,29 +24,31 @@ class G1Cfg(CarryBoxCfg):
         curriculum = False
         resampling_time = 0.0
         resample_carry_commands = True
-        # Controlled V1 ablation: restore the pre-7115 command distribution so
-        # the first experiment isolates lower-body reward design. This is not
-        # intended to be the final target command distribution.
-        carry_command_mode_probabilities = [0.10, 0.25, 0.15, 0.15, 0.35]
-        carry_vx_range = [-0.5, 1.2]
-        carry_vy_range = [-0.4, 0.4]
-        carry_yaw_rate_range = [-0.5, 0.5]
+        # Full mixed loaded-locomotion command distribution:
+        # stand / vx-only / vy-only / yaw-only / mixed.
+        carry_command_mode_probabilities = [0.10, 0.10, 0.10, 0.10, 0.60]
+        carry_vx_range = [-0.6, 1.2]
+        carry_vy_range = [-0.5, 0.5]
+        carry_yaw_rate_range = [-0.7, 0.7]
         carry_mixed_ranges = [
-            [-0.4, 0.96],
-            [-0.32, 0.32],
-            [-0.4, 0.4],
+            [-0.6, 1.2],
+            [-0.5, 0.5],
+            [-0.7, 0.7],
         ]
+        carry_min_moving_vx = 0.10
+        carry_min_moving_vy = 0.10
+        carry_min_moving_yaw = 0.10
         carry_command_resample_interval_s = [4.0, 6.0]
-        carry_moving_vx_range = [-0.5, 1.2]
+        carry_moving_vx_range = [-0.6, 1.2]
         heading_command = False
         heading_to_ang_vel = False
         lin_vel_clip = 0.0
         ang_vel_clip = 0.0
 
         class ranges:
-            lin_vel_x = [-0.5, 1.2]
-            lin_vel_y = [-0.4, 0.4]
-            ang_vel_yaw = [-0.5, 0.5]
+            lin_vel_x = [-0.6, 1.2]
+            lin_vel_y = [-0.5, 0.5]
+            ang_vel_yaw = [-0.7, 0.7]
             heading = [0.0, 0.0]
 
     class rewards(CarryBoxCfg.rewards):
@@ -63,8 +65,8 @@ class G1Cfg(CarryBoxCfg):
             carry_arm_range = 0.2
 
             # Lower-body feasible-family constraints. The broad 12-joint box
-            # and legacy one-sided stance cap are disabled for the clean V1
-            # ablation; their constants remain available as a safety envelope.
+            # and legacy one-sided stance cap remain disabled; their constants
+            # remain available as a safety envelope.
             carry_hip_posture = 0.8
             carry_foot_heading = 0.35
             carry_feet_width = 0.30
@@ -295,7 +297,7 @@ class G1CfgPPO(CarryBoxCfgPPO):
 
 
 class G1CfgAblationA(G1Cfg):
-    """Current upper body + pre-7115 commands + lower constraints OFF."""
+    """Expanded commands with lower-body constraints disabled."""
 
     class rewards(G1Cfg.rewards):
         class scales(G1Cfg.rewards.scales):
@@ -306,7 +308,7 @@ class G1CfgAblationA(G1Cfg):
 
 
 class G1CfgAblationB(G1CfgAblationA):
-    """Current upper body + current harder commands + lower constraints OFF."""
+    """Legacy ablation overrides on the expanded-command base config."""
 
     class commands(G1Cfg.commands):
         carry_command_mode_probabilities = [0.10, 0.15, 0.10, 0.15, 0.50]

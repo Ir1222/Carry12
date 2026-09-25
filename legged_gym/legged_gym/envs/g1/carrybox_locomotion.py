@@ -83,6 +83,21 @@ def quaternion_rotation_vector(quaternion):
     return vector * scale
 
 
+def sample_uniform_excluding_deadzone(value_range, minimum, count, device):
+    """Uniform density across both valid intervals, weighted by their lengths."""
+    low, high = value_range
+    if minimum <= 0.0 or low >= -minimum or high <= minimum:
+        raise ValueError("Moving-command range must span both sides of the deadzone")
+    negative_length = -minimum - low
+    total_length = negative_length + high - minimum
+    position = torch.rand(count, device=device) * total_length
+    return torch.where(
+        position < negative_length,
+        low + position,
+        minimum + position - negative_length,
+    )
+
+
 class LeggedRobot(CarryBoxBase):
     """CarryBox variant that starts in, and remains in, the carry phase."""
 
@@ -454,7 +469,7 @@ class LeggedRobot(CarryBoxBase):
         )
 
     def _sample_carry_commands(self, env_ids):
-        """Sample stand/pure-axis/mixed commands from the fixed V1 mixture."""
+        """Sample the full mixed loaded-locomotion command distribution."""
         num_envs = len(env_ids)
         if num_envs == 0:
             return
@@ -477,26 +492,40 @@ class LeggedRobot(CarryBoxBase):
         self.carry_command_mode[env_ids] = modes
         self.commands[env_ids] = 0.0
 
-        def sample_axis(mode, axis, value_range):
+        def sample_axis(mode, axis, value_range, minimum):
             selected = env_ids[modes == mode]
             if len(selected) > 0:
-                self.commands[selected, axis] = torch_rand_float(
-                    value_range[0], value_range[1], (len(selected), 1),
-                    device=self.device
-                ).squeeze(1)
+                self.commands[selected, axis] = sample_uniform_excluding_deadzone(
+                    value_range, minimum, len(selected), self.device
+                )
 
-        sample_axis(1, 0, self.cfg.commands.carry_vx_range)
-        sample_axis(2, 1, self.cfg.commands.carry_vy_range)
-        sample_axis(3, 2, self.cfg.commands.carry_yaw_rate_range)
+        sample_axis(1, 0, self.cfg.commands.carry_vx_range,
+                    self.cfg.commands.carry_min_moving_vx)
+        sample_axis(2, 1, self.cfg.commands.carry_vy_range,
+                    self.cfg.commands.carry_min_moving_vy)
+        sample_axis(3, 2, self.cfg.commands.carry_yaw_rate_range,
+                    self.cfg.commands.carry_min_moving_yaw)
 
         mixed_env_ids = env_ids[modes == 4]
         if len(mixed_env_ids) > 0:
             mixed_ranges = self.cfg.commands.carry_mixed_ranges
-            for axis in range(3):
-                self.commands[mixed_env_ids, axis] = torch_rand_float(
-                    mixed_ranges[axis][0], mixed_ranges[axis][1],
-                    (len(mixed_env_ids), 1), device=self.device
-                ).squeeze(1)
+            if len(mixed_ranges) != 3 or any(low >= high for low, high in mixed_ranges):
+                raise ValueError("carry_mixed_ranges must contain three ordered ranges")
+            remaining = mixed_env_ids
+            for _ in range(4):
+                if len(remaining) == 0:
+                    break
+                for axis, (low, high) in enumerate(mixed_ranges):
+                    self.commands[remaining, axis] = torch_rand_float(
+                        low, high, (len(remaining), 1), device=self.device
+                    ).squeeze(1)
+                command = self.commands[remaining, :3]
+                moving = (torch.norm(command[:, :2], dim=-1) >= 0.10) | (
+                    torch.abs(command[:, 2]) >= 0.10
+                )
+                remaining = remaining[~moving]
+            if len(remaining) > 0:
+                raise RuntimeError("Could not sample moving mixed commands in four retries")
 
     def _sample_carry_command_resample_time(self, env_ids):
         if len(env_ids) == 0:
