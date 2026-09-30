@@ -245,5 +245,7 @@ def evaluate(eval_args, legged_args):
 if __name__ == "__main__":
     evaluator_args = parse_evaluator_args()
     import isaacgym  # noqa: F401
+    # Match the legged_gym entry points: envs must initialize before utils.
+    import legged_gym.envs  # noqa: F401
     from legged_gym.utils import get_args
     evaluate(evaluator_args, get_args())
