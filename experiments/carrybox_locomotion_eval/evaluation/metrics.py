@@ -466,12 +466,154 @@ def aggregate_by_mode(summary_rows):
     return mode_rows
 
 
+def step_response_metrics(samples, previous_command, command, *, policy_dt,
+                          completed, onset_actual, hold_s=.20):
+    """Describe the observed transient; censored segments never claim settling."""
+    axes = ("vx", "vy", "yaw_rate")
+    result = {"dynamics_complete": int(bool(completed)),
+              "dynamics_sample_count": len(samples),
+              "dynamics_duration_s": len(samples) * policy_dt,
+              "overshoot_scope": ("complete_segment" if completed else
+                                  "observed_prefix" if samples else "unavailable")}
+    tail_steps = max(1, math.ceil(hold_s / policy_dt - 1e-9))
+    for i, axis in enumerate(axes):
+        old, target = float(previous_command[i]), float(command[i])
+        delta = target - old
+        changed = not math.isclose(delta, 0., abs_tol=1e-12)
+        prefix = axis + "_"
+        result.update({prefix + "command_changed": int(changed),
+                       prefix + "previous_command": old,
+                       prefix + "target_command": target,
+                       prefix + "command_delta": delta,
+                       prefix + "initial_actual": (float(onset_actual[i]) if onset_actual is not None
+                                                   else float("nan")),
+                       prefix + "settling_tolerance": max(.05, .05 * abs(delta)) if changed else float("nan"),
+                       prefix + "overshoot": float("nan"),
+                       prefix + "overshoot_signed": float("nan"),
+                       prefix + "overshoot_pct": float("nan"),
+                       prefix + "settling_time_s": float("nan"),
+                       prefix + "settled": 0})
+        if not changed or not samples or onset_actual is None:
+            continue
+        values = [float(s[f"actual_{axis}_training_frame"]) for s in samples]
+        times = [float(s["command_time_s"]) for s in samples]
+        if not all(math.isfinite(v) for v in values + times):
+            continue
+        directional = max(0., max(math.copysign(1., delta) * (v - target) for v in values))
+        result[prefix + "overshoot"] = directional
+        result[prefix + "overshoot_signed"] = math.copysign(directional, delta)
+        result[prefix + "overshoot_pct"] = 100. * directional / abs(delta)
+        if completed:
+            tol = result[prefix + "settling_tolerance"]
+            for j, (time_s, value) in enumerate(zip(times, values)):
+                if len(values) - j >= tail_steps and all(abs(v - target) <= tol for v in values[j:]):
+                    result[prefix + "settling_time_s"] = time_s
+                    result[prefix + "settled"] = 1
+                    break
+    changed_axes = [axis for axis in axes if result[axis + "_command_changed"]]
+    result["coupled_settled"] = int(bool(changed_axes) and all(result[axis + "_settled"] for axis in changed_axes))
+    result["coupled_settling_time_s"] = (max(result[axis + "_settling_time_s"] for axis in changed_axes)
+                                           if result["coupled_settled"] else float("nan"))
+    return result
+
+
+def aggregate_protocols(summary_rows, segment_rows, *, include_case_breakdown=True):
+    """Attempt denominators are never multiplied by a sequence's five segments."""
+    result = []
+    families = tuple(dict.fromkeys((r["protocol"], r["mode"]) for r in summary_rows))
+    for protocol, mode in families:
+        attempts = [r for r in summary_rows if r["protocol"] == protocol and r["mode"] == mode]
+        initialized = [r for r in attempts if int(r["initialization_success"])]
+        segments = [r for r in segment_rows if r["protocol"] == protocol and r["sequence_family"] == mode]
+        observed_attempts = {r["trial_id"] for r in segments if r["measurement_steps"] > 0}
+        base = {"protocol": protocol, "mode": mode, "case_type": "all",
+                "number_of_trials": len(attempts),
+                "number_of_initialized_trials": len(initialized),
+                "number_of_completed_tracking_trials": sum(int(r["trial_completed"]) for r in attempts),
+                "number_of_trials_with_measure_samples": len(observed_attempts),
+                "initialization_success_rate": len(initialized) / len(attempts),
+                "conditional_completion_rate": mean(int(r["trial_completed"]) for r in initialized),
+                "end_to_end_completion_rate": mean(int(r["trial_completed"]) for r in attempts),
+                "completion_rate": mean(int(r["trial_completed"]) for r in attempts),
+                "number_of_segments": len(segments),
+                "number_of_completed_segments": sum(int(r["segment_status"] == "completed") for r in segments),
+                "number_of_segments_with_measure_samples": sum(int(r["measurement_steps"] > 0) for r in segments),
+                "observed_measurement_duration_s": sum(float(r["measurement_duration_s"]) for r in segments),
+                "settle_duration_s_mean": mean(float(r["settle_duration_s"]) for r in attempts),
+                "settle_duration_s_p95": percentile((float(r["settle_duration_s"]) for r in attempts), 95.),
+                "quantile_note": "means of per-segment P95 are not pooled P95"}
+        for metric in COMMON_INTEGRITY_METRICS:
+            _add_distribution(base, metric, _finite(
+                attempts if metric == "survival_duration_s" else segments, metric))
+        by_trial = {}
+        for segment in segments:
+            by_trial.setdefault(segment["trial_id"], []).append(segment)
+        base["final_confirmed_carry_rate"] = mean(
+            int(bool(r["trial_completed"]) and
+                bool(by_trial.get(r["trial_id"]) and
+                     by_trial[r["trial_id"]][-1].get("final_confirmed_carry", 0)))
+            for r in attempts)
+        base["grasp_loss_occurrence_rate"] = mean(
+            int(r.get("termination_reason") == "grasp_loss" or any(
+                s.get("grasp_loss_occurrence", 0) for s in by_trial.get(r["trial_id"], ())))
+            for r in attempts)
+        for metric in ALL_MODE_TRACKING_METRICS:
+            for prefix, selected in (("completed_only_", [s for s in segments if s["segment_status"] == "completed"]),
+                                     ("all_observed_", [s for s in segments if s["measurement_steps"] > 0])):
+                _add_distribution(base, prefix + metric, _finite(selected, metric))
+        for axis in ("vx", "vy", "yaw_rate"):
+            for metric in ("overshoot", "overshoot_pct", "settling_time_s"):
+                key = axis + "_" + metric
+                _add_distribution(base, key, _finite([s for s in segments if s["segment_status"] == "completed"], key))
+        _add_distribution(base, "coupled_settling_time_s", _finite(
+            [s for s in segments if s["segment_status"] == "completed"], "coupled_settling_time_s"))
+        result.append(base)
+        if include_case_breakdown and protocol == "constant" and mode == "mixed":
+            for case in ("corner", "interior"):
+                selected_attempts = [r for r in attempts if r["case_type"] == case]
+                if selected_attempts:
+                    selected_ids = {r["trial_id"] for r in selected_attempts}
+                    selected_segments = [r for r in segments if r["trial_id"] in selected_ids]
+                    detail = aggregate_protocols(selected_attempts, selected_segments,
+                                                 include_case_breakdown=False)[0]
+                    detail["case_type"] = case
+                    result.append(detail)
+    constant_modes = [r for r in result if r["protocol"] == "constant"
+                      and r["case_type"] == "all"]
+    if constant_modes and include_case_breakdown:
+        count_keys = ("number_of_trials", "number_of_initialized_trials",
+                      "number_of_completed_tracking_trials",
+                      "number_of_trials_with_measure_samples", "number_of_segments",
+                      "number_of_completed_segments",
+                      "number_of_segments_with_measure_samples")
+        for label, weights in (("macro_average", {r["mode"]: 1. for r in constant_modes}),
+                               ("training_distribution_weighted_secondary", TRAINING_MODE_WEIGHTS)):
+            combined = {"protocol": "constant", "mode": label, "case_type": "all"}
+            for key in count_keys:
+                combined[key] = sum(r[key] for r in constant_modes)
+            for key, value in constant_modes[0].items():
+                if key in combined or key in ("protocol", "mode", "case_type"):
+                    continue
+                if isinstance(value, str):
+                    combined[key] = "weighted mean of per-mode values; not pooled quantiles"
+                    continue
+                finite = [(r[key], weights.get(r["mode"], 0.)) for r in constant_modes
+                          if isinstance(r[key], (int, float)) and math.isfinite(r[key])]
+                denominator = sum(weight for _, weight in finite)
+                combined[key] = (sum(value * weight for value, weight in finite) / denominator
+                                 if denominator else float("nan"))
+            result.append(combined)
+    return result
+
+
 def write_csv(path, rows, fieldnames=None):
     rows = list(rows)
     if fieldnames is None:
         if not rows:
             raise ValueError(f"Cannot infer CSV schema for empty output: {path}")
-        fieldnames = tuple(rows[0].keys())
+        # Initialization failures and successful trials have different
+        # available diagnostics; keep every column regardless of row order.
+        fieldnames = tuple(dict.fromkeys(key for row in rows for key in row))
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)

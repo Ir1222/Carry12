@@ -1,10 +1,17 @@
 """Deterministic command manifests for carry-locomotion evaluation."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+import math
 from typing import Iterable, List, Sequence, Tuple
 
 
 MODES = ("stand", "vx", "vy", "yaw", "mixed")
+STEP_COMMANDS = {
+    "vx": ((.40, 0., 0.), (1.20, 0., 0.), (-.60, 0., 0.), (-.15, 0., 0.), (0., 0., 0.)),
+    "vy": ((0., .15, 0.), (0., .50, 0.), (0., -.50, 0.), (0., -.15, 0.), (0., 0., 0.)),
+    "yaw": ((0., 0., .20), (0., 0., .70), (0., 0., -.70), (0., 0., -.20), (0., 0., 0.)),
+    "mixed": ((.40, .15, .20), (1.20, .50, .70), (-.60, -.50, -.70), (.40, -.15, .20), (0., 0., 0.)),
+}
 TRAINING_MODE_WEIGHTS = {
     "stand": 0.10,
     "vx": 0.10,
@@ -36,9 +43,17 @@ class CommandCondition:
     carry_motion_id: int
     carry_phase: float
     case_type: str = "axis"
+    protocol: str = "constant"
+    segment_commands: Tuple[Tuple[float, float, float], ...] = ()
+
+    @property
+    def commands(self):
+        return self.segment_commands or ((self.vx, self.vy, self.yaw_rate),)
 
     def as_row(self):
-        return asdict(self)
+        row = asdict(self)
+        row.pop("segment_commands")
+        return row
 
 
 def _radical_inverse(index: int, base: int) -> float:
@@ -127,3 +142,46 @@ def modes_from_cli(mode: str) -> Tuple[str, ...]:
     if mode not in MODES:
         raise ValueError(f"Unknown mode: {mode}")
     return (mode,)
+
+
+def build_evaluation_suite(*, seeds, carry_motion_ids, carry_phases,
+                           modes=MODES, protocol="constant"):
+    """Expand a balanced context grid without changing the legacy 52 cases."""
+    if protocol not in ("constant", "step", "both"):
+        raise ValueError(f"Unknown protocol: {protocol}")
+    modes = tuple(modes)
+    if set(modes) - set(MODES):
+        raise ValueError(f"Unknown modes: {set(modes) - set(MODES)}")
+    if protocol == "step" and modes == ("stand",):
+        raise ValueError("stand has no step protocol; use constant or both")
+    seeds, carry_motion_ids, carry_phases = tuple(seeds), tuple(carry_motion_ids), tuple(carry_phases)
+    if not seeds or not carry_motion_ids or not carry_phases:
+        raise ValueError("Context lists must be nonempty")
+    for values in (seeds, carry_motion_ids, carry_phases):
+        if len(set(values)) != len(values):
+            raise ValueError("Repeated context values would duplicate trials")
+    if any(int(m) < 0 for m in carry_motion_ids):
+        raise ValueError("Motion IDs must be nonnegative")
+    if any(not math.isfinite(float(p)) or not 0. <= p <= 1. for p in carry_phases):
+        raise ValueError("Carry phases must be finite and within [0, 1]")
+    result = []
+    for motion_id in carry_motion_ids:
+        for phase in carry_phases:
+            for seed in seeds:
+                if protocol in ("constant", "both"):
+                    for c in build_command_suite(seed=seed, carry_motion_id=motion_id,
+                                                 carry_phase=phase, modes=modes):
+                        result.append(replace(c, trial_id=f"T{len(result)+1:06d}"))
+                if protocol in ("step", "both"):
+                    for mode in modes:
+                        if mode == "stand":
+                            continue
+                        commands = STEP_COMMANDS[mode]
+                        result.append(CommandCondition(
+                            trial_id=f"T{len(result)+1:06d}", mode=mode,
+                            vx=commands[0][0], vy=commands[0][1], yaw_rate=commands[0][2],
+                            seed=int(seed), carry_motion_id=int(motion_id),
+                            carry_phase=float(phase), case_type="sequence", protocol="step",
+                            segment_commands=commands,
+                        ))
+    return result

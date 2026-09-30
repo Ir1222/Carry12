@@ -1,17 +1,27 @@
-"""RESET_CARRY_REFERENCE -> WARMUP -> MEASURE -> END rollout."""
+"""Contact-qualified carry tracking and step-response rollouts."""
 
+from dataclasses import replace
 import math
 
 import torch
-from isaacgym.torch_utils import quat_rotate_inverse
-
-from legged_gym.utils.torch_utils import calc_heading_quat
 
 from .inference import assert_observation_compatibility
 from .metrics import (
     LOWER_BODY_TRACE_METRICS, PRESERVATION_METRICS, TRACKING_SCALES,
-    summarize_trial,
+    summarize_trial, step_response_metrics,
 )
+from .readiness import ReadinessConfig, ReadinessGate, readiness_checks
+
+
+READINESS_FIELDS = (
+    "left_hand_force_n", "right_hand_force_n", "left_hand_face_excess_m",
+    "right_hand_face_excess_m", "box_relative_vx_mps", "box_relative_vy_mps",
+    "box_relative_vz_mps", "box_bottom_m", "physical_state_finite",
+    "ready_finite", "ready_contact", "ready_geometry", "ready_slip",
+    "ready_relative_motion", "ready_health", "ready_all", "stable_steps",
+    "stable_duration_s", "longest_stable_s",
+)
+TRIAL_TRACE_FIELDS = ("protocol", "phase", "segment_index", "command_time_s", "command_onset_s")
 
 
 TRACE_FIELDS = (
@@ -29,7 +39,7 @@ TRACE_FIELDS = (
     "base_yaw", "carry_heading_ref", "carry_heading_error",
     "legacy_body_vx", "legacy_body_vy", "legacy_body_yaw_rate",
     "action_delta_rms", "action_rate_rms", "torque_rms", "feet_slip",
-) + PRESERVATION_METRICS + LOWER_BODY_TRACE_METRICS
+) + PRESERVATION_METRICS + LOWER_BODY_TRACE_METRICS + READINESS_FIELDS + TRIAL_TRACE_FIELDS
 
 
 def duration_steps(seconds, policy_dt, *, allow_zero=False):
@@ -43,6 +53,7 @@ def _scalar(tensor, env_id=0):
 
 def _carry_sample(env, previous_hand_box=None, previous_box_pos=None):
     """Evaluation-only measurements, independent of training logging buffers."""
+    from isaacgym.torch_utils import quat_rotate_inverse
     c = env.cfg.rewards
     torso = env.rigid_body_states[:1, env.carry_torso_index]
     box = env.box_states[:1]
@@ -50,6 +61,8 @@ def _carry_sample(env, previous_hand_box=None, previous_box_pos=None):
     hands = env.rigid_body_states[:1, env.carry_palm_indices, :3] - box[:, None, :3]
     hand_box = quat_rotate_inverse(box[:, 3:7].expand(2, -1), hands.reshape(2, 3))
     side_error = (hand_box[:, 1] * hand_box.new_tensor([1., -1.]) - env._box_size[0, 1] / 2).abs()
+    face_excess = (hand_box[:, [0, 2]].abs() - env._box_size[0, [0, 2]] / 2
+                   - c.carry_hand_face_margin).clamp_min(0).amax(dim=-1)
     arms = env.dof_pos[0, env.carry_arm_indices]
     arm_error = ((arms.new_tensor(c.carry_arm_range_lower) - arms).clamp_min(0)
                  + (arms - arms.new_tensor(c.carry_arm_range_upper)).clamp_min(0))
@@ -58,9 +71,11 @@ def _carry_sample(env, previous_hand_box=None, previous_box_pos=None):
     if previous_hand_box is None:
         slip = [float("nan"), float("nan")]
         speed = float("nan")
+        relative = [float("nan")] * 3
     else:
         slip = ((hand_box - previous_hand_box)[:, [0, 2]] / env.dt).norm(dim=-1).tolist()
-        speed = ((box_pos - previous_box_pos) / env.dt).norm().item()
+        relative = ((box_pos - previous_box_pos) / env.dt)[0].tolist()
+        speed = math.sqrt(sum(value * value for value in relative))
     metrics = {
         "left_hand_side_error_m": side_error[0].item(),
         "right_hand_side_error_m": side_error[1].item(),
@@ -69,6 +84,11 @@ def _carry_sample(env, previous_hand_box=None, previous_box_pos=None):
         "arm_range_violation_rad": arm_error.max().item(),
         "box_relative_region_violation_m": position_error.norm().item(),
         "box_relative_motion_error_mps": speed,
+        "left_hand_face_excess_m": face_excess[0].item(),
+        "right_hand_face_excess_m": face_excess[1].item(),
+        "box_relative_vx_mps": relative[0],
+        "box_relative_vy_mps": relative[1],
+        "box_relative_vz_mps": relative[2],
     }
     hip = env.carry_hip_error[0]
     foot_heading = env.carry_foot_heading_error[0]
@@ -105,7 +125,11 @@ def _carry_sample(env, previous_hand_box=None, previous_box_pos=None):
     return metrics, hand_box, box_pos
 
 
-def _sample(env, condition, *, policy_step, time_s, actions, previous_actions, carry_sample):
+def _sample(env, condition, *, policy_step, time_s, actions, previous_actions,
+            carry_sample, phase, segment_index, command_time_s, command_onset_s,
+            gate=None, readiness_config=None):
+    from isaacgym.torch_utils import quat_rotate_inverse
+    from legged_gym.utils.torch_utils import calc_heading_quat
     env_id = 0
     command = env.carry_policy_commands[env_id, :3]
     actual = torch.stack(
@@ -210,97 +234,207 @@ def _sample(env, condition, *, policy_step, time_s, actions, previous_actions, c
             torch.sqrt(torch.mean(env.torques[env_id].square())).item()
         ),
         "feet_slip": float(feet_slip.item()),
+        "left_hand_force_n": float(torch.linalg.vector_norm(
+            env.contact_forces[env_id, env.hand_colli_indices[0]]).item()),
+        "right_hand_force_n": float(torch.linalg.vector_norm(
+            env.contact_forces[env_id, env.hand_colli_indices[1]]).item()),
+        "box_bottom_m": float(box_bottom.item()),
+        "physical_state_finite": int(all(bool(torch.isfinite(t).all().item()) for t in (
+            env.root_states[env_id], env.box_states[env_id], env.dof_pos[env_id],
+            env.dof_vel[env_id], env.contact_forces[env_id, env.hand_colli_indices]))),
+        "protocol": condition.protocol,
+        "phase": phase,
+        "segment_index": segment_index,
+        "command_time_s": command_time_s,
+        "command_onset_s": command_onset_s,
     }
     sample.update(carry_sample)
-    if tuple(sample) != TRACE_FIELDS:
+    checks = readiness_checks(sample, readiness_config)
+    sample.update({"ready_" + key: int(value) for key, value in checks.items()})
+    sample["stable_steps"] = gate.streak if gate else 0
+    sample["stable_duration_s"] = gate.streak * env.dt if gate else 0.0
+    sample["longest_stable_s"] = gate.longest_stable_s if gate else 0.0
+    if set(sample) != set(TRACE_FIELDS):
         raise AssertionError("Trace schema changed unexpectedly")
     return sample
 
 
-def run_trial(env, policy, condition, *, warmup_s, duration_s, seed_fn):
-    command = (condition.vx, condition.vy, condition.yaw_rate)
-    seed_fn(condition.seed)
-    env.set_evaluation_command(command)
-    env.clear_evaluation_outcome()
-    obs, _ = env.reset()
-    assert_observation_compatibility(env, obs, command)
-    if env.eval_last_termination_reason[0]:
-        raise RuntimeError(
-            "The mandatory zero-action reset step terminated: "
-            f"{env.eval_last_termination_reason[0]}"
-        )
+def _actual(env):
+    return (float(env.base_lin_vel_yaw[0, 0].item()),
+            float(env.base_lin_vel_yaw[0, 1].item()),
+            float(env.base_yaw_rate_world[0].item()))
 
+
+def _segment_condition(condition, command):
+    return replace(condition, vx=float(command[0]), vy=float(command[1]),
+                   yaw_rate=float(command[2]))
+
+
+def run_trial(env, policy, condition, *, warmup_s, duration_s, seed_fn,
+              stable_hold_s=.20, settle_timeout_s=2.):
+    """One reset attempt; a step trial has five segments but only one gate."""
     policy_dt = float(env.dt)
     warmup_steps = duration_steps(warmup_s, policy_dt, allow_zero=True)
     measure_steps = duration_steps(duration_s, policy_dt)
-    total_steps = warmup_steps + measure_steps
-    previous_actions = torch.zeros(
-        env.num_envs, env.num_actions, device=env.device
-    )
-    samples = []
+    config = ReadinessConfig.from_env(env, stable_hold_s, settle_timeout_s)
+    gate = ReadinessGate(config, policy_dt)
+    seed_fn(condition.seed)
+    env.set_evaluation_reset(condition.carry_motion_id, condition.carry_phase)
+    env.set_evaluation_command((0., 0., 0.))
+    env.clear_evaluation_outcome()
+    obs, _ = env.reset()
+    previous_actions = torch.zeros(env.num_envs, env.num_actions, device=env.device)
+    trace, segment_rows = [], []
     executed_steps = 0
-    termination_reason = "completed"
+    termination_reason = env.eval_last_termination_reason[0] or "completed"
+    termination_phase = "RESET" if termination_reason != "completed" else ""
+    initialized = False
+    onset_s = float("nan")
+    first_onset_s = float("nan")
+    if not termination_phase:
+        assert_observation_compatibility(env, obs, (0., 0., 0.))
+        _, previous_hand_box, previous_box_pos = _carry_sample(env)
+        for _ in range(gate.max_steps):
+            with torch.inference_mode():
+                actions = policy(obs.detach())
+            obs, _, _, dones, _, _, _, _ = env.step(actions.detach())
+            executed_steps += 1
+            if torch.count_nonzero(env.disturbance).item() != 0:
+                raise AssertionError("No-force evaluation produced a robot disturbance")
+            if bool(dones[0].item()):
+                termination_reason = env.eval_last_termination_reason[0] or "termination"
+                termination_phase = "SETTLE"
+                break
+            env.assert_evaluation_command(obs)
+            carry_sample, previous_hand_box, previous_box_pos = _carry_sample(
+                env, previous_hand_box, previous_box_pos)
+            sample = _sample(env, condition, policy_step=executed_steps,
+                             time_s=executed_steps * policy_dt, actions=actions,
+                             previous_actions=previous_actions, carry_sample=carry_sample,
+                             phase="SETTLE", segment_index=-1,
+                             command_time_s=float("nan"),
+                             command_onset_s=float("nan"), gate=gate,
+                             readiness_config=config)
+            initialized = gate.update(sample)
+            sample["stable_steps"] = gate.streak
+            sample["stable_duration_s"] = gate.streak * policy_dt
+            sample["longest_stable_s"] = gate.longest_stable_s
+            trace.append(sample)
+            previous_actions.copy_(actions)
+            if initialized:
+                break
+        if not initialized and not termination_phase:
+            termination_reason = "initialization_timeout"
+            termination_phase = "SETTLE"
 
-    print(
-        f"[{condition.trial_id}] mode={condition.mode} command={command} "
-        f"seed={condition.seed}"
-    )
-    _, previous_hand_box, previous_box_pos = _carry_sample(env)
-    for step_index in range(total_steps):
-        with torch.inference_mode():
-            actions = policy(obs.detach())
-        obs, _, _, dones, _, _, _, _ = env.step(actions.detach())
-        executed_steps += 1
+    previous_command = (0., 0., 0.)
+    for index, command in enumerate(condition.commands):
+        segment_condition = _segment_condition(condition, command)
+        if not initialized or termination_phase:
+            row = summarize_trial(segment_condition, [], policy_dt=policy_dt,
+                                  requested_steps=measure_steps, executed_steps=0,
+                                  termination_reason="not_reached")
+            row.update({"segment_index": index, "segment_mode": "stand" if not any(command) else condition.mode,
+                        "sequence_family": condition.mode, "segment_status": "not_reached",
+                        "initialization_success": int(initialized),
+                        "termination_phase": termination_phase or "NOT_REACHED",
+                        "command_onset_s": float("nan")})
+            row.update(step_response_metrics([], previous_command, command,
+                                             policy_dt=policy_dt, completed=False,
+                                             onset_actual=None))
+            segment_rows.append(row)
+            previous_command = command
+            continue
+        env.set_evaluation_command(command)
+        obs = env.get_observations()
         env.assert_evaluation_command(obs)
-        if torch.count_nonzero(env.disturbance).item() != 0:
-            raise AssertionError("No-force evaluation produced a robot disturbance")
-        if bool(dones[0].item()):
-            termination_reason = env.eval_last_termination_reason[0] or "termination"
-            break
-        carry_sample, previous_hand_box, previous_box_pos = _carry_sample(
-            env, previous_hand_box, previous_box_pos)
-        if step_index >= warmup_steps:
-            samples.append(
-                _sample(
-                    env,
-                    condition,
-                    policy_step=executed_steps,
-                    time_s=executed_steps * policy_dt,
-                    actions=actions,
-                    previous_actions=previous_actions,
-                    carry_sample=carry_sample,
-                )
-            )
-        previous_actions.copy_(actions)
+        onset_actual = _actual(env)
+        onset_s = executed_steps * policy_dt
+        if index == 0:
+            first_onset_s = onset_s
+        measurements, response = [], []
+        segment_steps = 0
+        for step_index in range(warmup_steps + measure_steps):
+            with torch.inference_mode():
+                actions = policy(obs.detach())
+            obs, _, _, dones, _, _, _, _ = env.step(actions.detach())
+            executed_steps += 1
+            segment_steps += 1
+            if torch.count_nonzero(env.disturbance).item() != 0:
+                raise AssertionError("No-force evaluation produced a robot disturbance")
+            if bool(dones[0].item()):
+                termination_reason = env.eval_last_termination_reason[0] or "termination"
+                termination_phase = "WARMUP" if step_index < warmup_steps else "MEASURE"
+                break
+            env.assert_evaluation_command(obs)
+            carry_sample, previous_hand_box, previous_box_pos = _carry_sample(
+                env, previous_hand_box, previous_box_pos)
+            phase = "WARMUP" if step_index < warmup_steps else "MEASURE"
+            sample = _sample(env, segment_condition,
+                             policy_step=executed_steps, time_s=executed_steps * policy_dt,
+                             actions=actions, previous_actions=previous_actions,
+                             carry_sample=carry_sample, phase=phase, segment_index=index,
+                             command_time_s=(step_index + 1) * policy_dt,
+                             command_onset_s=onset_s, readiness_config=config)
+            trace.append(sample)
+            response.append(sample)
+            if phase == "MEASURE":
+                measurements.append(sample)
+            previous_actions.copy_(actions)
+        completed = not termination_phase and len(measurements) == measure_steps
+        row = summarize_trial(segment_condition, measurements, policy_dt=policy_dt,
+                              requested_steps=measure_steps, executed_steps=segment_steps,
+                              termination_reason="completed" if completed else termination_reason)
+        row.update({"segment_index": index,
+                    "segment_mode": "stand" if not any(command) else condition.mode,
+                    "sequence_family": condition.mode,
+                    "segment_status": "completed" if completed else "terminated",
+                    "initialization_success": 1, "termination_phase": termination_phase or "END",
+                    "command_onset_s": onset_s})
+        row.update(step_response_metrics(response, previous_command, command,
+                                         policy_dt=policy_dt, completed=completed,
+                                         onset_actual=onset_actual))
+        segment_rows.append(row)
+        previous_command = command
 
-    summary = summarize_trial(
-        condition,
-        samples,
-        policy_dt=policy_dt,
-        requested_steps=measure_steps,
-        executed_steps=executed_steps,
-        termination_reason=termination_reason,
-    )
-    print(
-        f"[{condition.trial_id}] completed={summary['trial_completed']} "
-        f"reason={termination_reason} samples={len(samples)}/{measure_steps}"
-    )
-    return samples, summary
+    whole_completed = initialized and not termination_phase and all(
+        row["segment_status"] == "completed" for row in segment_rows)
+    if whole_completed:
+        termination_reason = "completed"
+        termination_phase = "END"
+    if condition.protocol == "constant" and initialized:
+        summary = dict(segment_rows[0])
+    else:
+        summary = summarize_trial(condition, [], policy_dt=policy_dt,
+                                  requested_steps=measure_steps, executed_steps=executed_steps,
+                                  termination_reason=termination_reason)
+    summary.update({"initialization_success": int(initialized),
+                    "trial_completed": int(whole_completed),
+                    "termination_reason": termination_reason,
+                    "termination_phase": termination_phase,
+                    "settle_duration_s": gate.elapsed_s,
+                    "longest_stable_s": gate.longest_stable_s,
+                    "stable_required_steps": gate.required_steps,
+                    "command_onset_s": first_onset_s,
+                    "survival_duration_s": executed_steps * policy_dt})
+    for key in ("finite", "contact", "geometry", "slip", "relative_motion", "health"):
+        summary["last_ready_" + key] = int(gate.last_checks.get(key, False))
+    print(f"[{condition.trial_id}] {condition.protocol}/{condition.mode} "
+          f"initialized={int(initialized)} completed={int(whole_completed)} "
+          f"reason={termination_reason}")
+    return trace, summary, segment_rows
 
 
 def run_suite(env, policy, conditions, *, warmup_s, duration_s, seed_fn,
-              trace_writer=None):
-    summaries = []
+              trace_writer=None, stable_hold_s=.20, settle_timeout_s=2.):
+    summaries, segment_rows = [], []
     for condition in conditions:
-        samples, summary = run_trial(
-            env,
-            policy,
-            condition,
-            warmup_s=warmup_s,
-            duration_s=duration_s,
-            seed_fn=seed_fn,
-        )
+        trace, summary, segments = run_trial(
+            env, policy, condition, warmup_s=warmup_s, duration_s=duration_s,
+            seed_fn=seed_fn, stable_hold_s=stable_hold_s,
+            settle_timeout_s=settle_timeout_s)
         if trace_writer is not None:
-            trace_writer(condition.trial_id, samples)
+            trace_writer(condition.trial_id, trace)
         summaries.append(summary)
-    return summaries
+        segment_rows.extend(segments)
+    return summaries, segment_rows

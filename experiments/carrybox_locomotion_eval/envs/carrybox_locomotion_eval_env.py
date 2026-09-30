@@ -27,6 +27,21 @@ class CarryBoxLocomotionEvalEnv(carrybox_locomotion.LeggedRobot):
         self._eval_requested_command[:] = requested
         self._eval_command_active = True
         self._apply_evaluation_command()
+        # Changing a command between physics steps must update the newest
+        # actor frame, without appending a duplicate history frame.
+        self.obs_buf[:, -3:] = requested
+        if hasattr(self, "privileged_obs_buf"):
+            self.privileged_obs_buf[:, -3:] = requested
+        self.assert_evaluation_command(self.obs_buf)
+
+    def set_evaluation_reset(self, motion_id, phase):
+        """Choose the next fixed CarryWith frame without changing reset physics."""
+        if not 0 <= int(motion_id) < self.motionlib.num_motion[self._CARRY_SKILL]:
+            raise ValueError(f"Invalid carry motion ID: {motion_id}")
+        if not 0.0 <= float(phase) <= 1.0 or not math.isfinite(float(phase)):
+            raise ValueError(f"Invalid carry phase: {phase}")
+        self.box_cfg.fixed_carry_motion_id = int(motion_id)
+        self.box_cfg.fixed_carry_phase = float(phase)
 
     def _apply_evaluation_command(self, env_ids=None):
         if not self._eval_command_active:
