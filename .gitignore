@@ -66,6 +66,10 @@ legged_gym/legged_gym/scripts/plot*
 legged_gym/legged_gym/scripts/figure*
 legged_gym/legged_gym/scripts/wandb
 
+# Local-only analysis outputs
+analysis/
+box_drop_analysis/
+
 isaacgym
 
 # other
