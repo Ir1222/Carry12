@@ -22,6 +22,9 @@ def parse_args():
     p.add_argument("--collect_teacher", action="store_true")
     own, remaining = p.parse_known_args()
     __import__("isaacgym")  # Must initialize before importing torch.
+    # Match the existing entrypoints: envs must start registration before utils
+    # imports task_registry, which itself imports a config from the envs package.
+    __import__("legged_gym.envs")
     from legged_gym.utils import get_args
     saved = sys.argv
     try:

@@ -19,6 +19,9 @@ def parse_args():
     own, remaining = parser.parse_known_args()
     # Isaac Gym must be imported before PyTorch.
     __import__("isaacgym")  # Must initialize before importing torch.
+    # Match the existing entrypoints: envs must start registration before utils
+    # imports task_registry, which itself imports a config from the envs package.
+    __import__("legged_gym.envs")
     from legged_gym.utils import get_args
     saved = sys.argv
     try:
