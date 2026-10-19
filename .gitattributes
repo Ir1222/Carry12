@@ -1,0 +1,2 @@
+shared_artifacts/**/*.pt filter=lfs diff=lfs merge=lfs -text
+shared_artifacts/**/events.out.tfevents.* filter=lfs diff=lfs merge=lfs -text
