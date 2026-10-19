@@ -132,6 +132,10 @@ class CarryLocomotionPPO:
         last_values = self.actor_critic.evaluate(last_critic_obs).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
+    def _auxiliary_loss(self, observations, action_mean):
+        """Extension point; legacy locomotion training has no auxiliary loss."""
+        return 0.0
+
     def update(self):
         mean_value_loss = 0
         mean_surrogate_loss = 0
@@ -266,6 +270,7 @@ class CarryLocomotionPPO:
                 + value_smooth_coef * value_smooth_loss
             )
             loss += smooth_loss
+            loss += self._auxiliary_loss(obs_batch, mu_batch)
 
             self.optimizer.zero_grad()
             loss.backward()

@@ -1,0 +1,14 @@
+{
+  "handoff": {
+    "student_timeout_s": 45.0,
+    "target_rate_arms": 2.0,
+    "target_rate_waist": 1.5,
+    "target_rate_legs": 12.0
+  },
+  "algorithm": {
+    "learning_rate": 0.00005,
+    "min_valid_samples": 2048,
+    "num_learning_epochs": 5,
+    "num_mini_batches": 4
+  }
+}

@@ -32,8 +32,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from muon import SingleDeviceMuonWithAuxAdam
-
 from rsl_rl.modules import ActorCritic
 from rsl_rl.storage import HIMRolloutStorage
 
@@ -95,6 +93,8 @@ class HIMPPO:
         self.motion_buffer = motion_buffer
 
         if use_muon_optim:
+            from muon import SingleDeviceMuonWithAuxAdam
+
             ac_hidden_weights = [p for p in self.actor_critic.parameters() if p.ndim >= 2]
             amp_trunk_hidden_weights = [p for p in self.amp.trunk.parameters() if p.ndim >= 2]
             amp_linear_hidden_weights = [p for p in self.amp.amp_linear.parameters() if p.ndim >= 2]
@@ -282,4 +282,3 @@ class HIMPPO:
         self.storage.clear()
 
         return mean_value_loss, mean_surrogate_loss, mean_amp_loss, mean_expert_loss, mean_policy_loss
-    

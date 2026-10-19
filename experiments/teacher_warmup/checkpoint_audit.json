@@ -1,0 +1,94 @@
+{
+  "teacher": {
+    "dims": [
+      738,
+      512,
+      256,
+      256,
+      29
+    ],
+    "critic_input": 126,
+    "std_shape": [
+      29
+    ],
+    "amp": true,
+    "activation": "ELU (source-code contract; absent from state_dict)",
+    "sha256": "1a7adf066916d19f45d92ac5b564fbd0a21c0401a3b91fe1d5df0111e45c4ded",
+    "checkpoint_keys": [
+      "amp_state_dict",
+      "infos",
+      "iter",
+      "model_state_dict",
+      "optimizer_state_dict"
+    ],
+    "std_min": 0.03469719737768173,
+    "std_max": 0.6414015293121338,
+    "parameter_count": 582941
+  },
+  "student": {
+    "dims": [
+      738,
+      512,
+      256,
+      256,
+      29
+    ],
+    "critic_input": 126,
+    "std_shape": [
+      29
+    ],
+    "amp": false,
+    "activation": "ELU (source-code contract; absent from state_dict)",
+    "sha256": "1b537657e61495dcd76f60b3c5d624825549a2d41cbe44a85dfa4628329875d2",
+    "checkpoint_keys": [
+      "infos",
+      "iter",
+      "model_state_dict",
+      "optimizer_state_dict"
+    ],
+    "std_min": 0.03353960067033768,
+    "std_max": 0.7647683620452881,
+    "parameter_count": 582941
+  },
+  "joint_order": [
+    "0 left_hip_pitch_joint",
+    "1 left_hip_roll_joint",
+    "2 left_hip_yaw_joint",
+    "3 left_knee_joint",
+    "4 left_ankle_pitch_joint",
+    "5 left_ankle_roll_joint",
+    "6 right_hip_pitch_joint",
+    "7 right_hip_roll_joint",
+    "8 right_hip_yaw_joint",
+    "9 right_knee_joint",
+    "10 right_ankle_pitch_joint",
+    "11 right_ankle_roll_joint",
+    "12 waist_yaw_joint",
+    "13 waist_roll_joint",
+    "14 waist_pitch_joint",
+    "15 left_shoulder_pitch_joint",
+    "16 left_shoulder_roll_joint",
+    "17 left_shoulder_yaw_joint",
+    "18 left_elbow_joint",
+    "19 left_wrist_roll_joint",
+    "20 left_wrist_pitch_joint",
+    "21 left_wrist_yaw_joint",
+    "22 right_shoulder_pitch_joint",
+    "23 right_shoulder_roll_joint",
+    "24 right_shoulder_yaw_joint",
+    "25 right_elbow_joint",
+    "26 right_wrist_roll_joint",
+    "27 right_wrist_pitch_joint",
+    "28 right_wrist_yaw_joint"
+  ],
+  "source_contract": {
+    "actor_frame": "108 proprio + 15 task; 6 frames = 738",
+    "proprio": "ang_vel(3), gravity(3), q-default(29), dq(29), end_effectors(15), applied_action(29)",
+    "task": "box_pos_local(3), box_rot_6d(6), box_size(3), raw command(3)",
+    "velocity_frame": "pelvis yaw frame vx/vy; world vertical yaw rate",
+    "action_scale": 0.25,
+    "control_dt": 0.02,
+    "target": "default_dof_pos + action_scale * clipped/applied_action",
+    "limitation": "ELU, joint mapping and normalization are inferred from source, not encoded by tensor shapes"
+  }
+}

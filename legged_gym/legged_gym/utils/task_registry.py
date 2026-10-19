@@ -132,6 +132,11 @@ class TaskRegistry():
         else:
             if name is not None:
                 print(f"'train_cfg' provided -> Ignoring 'name={name}'")
+        if getattr(train_cfg.runner, "runner_class_name", None) == "TeacherWarmupOnPolicyRunner":
+            raise ValueError(
+                "Teacher warmup requires student-masked PPO. Use "
+                "train_teacher_warmup_loco.py instead of the generic AMP runner."
+            )
         # override cfg from args (if specified)
         env_cfg, train_cfg = update_cfg_from_args(None, train_cfg, args)
 

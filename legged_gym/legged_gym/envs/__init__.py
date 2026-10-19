@@ -78,3 +78,11 @@ task_registry.register(
 task_registry.register( "carrybox_resume", G1CarryBox, G1CarryBoxResumeCfg(), G1CarryBoxResumeCfgPPO() )
 task_registry.register( "carrybox_perturb", G1CarryBoxPerturb, G1CarryBoxPerturbCfg(), G1CarryBoxPerturbCfgPPO() )
 task_registry.register( "carrybox_pi_only", G1CarryBoxPIOnly, G1CarryBoxPIOnlyCfg(), G1CarryBoxPIOnlyCfgPPO() )
+
+# Isolated task; existing CarryBox registrations/configurations are unchanged.
+from .g1.carrybox_teacher_warmup import LeggedRobot as G1TeacherWarmup
+from .g1.carrybox_teacher_warmup_config import G1Cfg as G1TeacherWarmupCfg
+from .g1.carrybox_teacher_warmup_config import G1CfgPPO as G1TeacherWarmupPPO
+
+task_registry.register("carrybox_teacher_warmup", G1TeacherWarmup,
+                       G1TeacherWarmupCfg(), G1TeacherWarmupPPO())
