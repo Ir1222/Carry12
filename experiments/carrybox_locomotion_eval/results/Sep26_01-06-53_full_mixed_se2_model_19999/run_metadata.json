@@ -1,0 +1,116 @@
+{
+  "protocol_version": "contact_gated_v1",
+  "status": "completed",
+  "checkpoint": "/home/gpu/Carry12/legged_gym/logs/carrybox_locomotion/Sep26_01-06-53_full_mixed_se2/model_19999.pt",
+  "checkpoint_sha256": "1b537657e61495dcd76f60b3c5d624825549a2d41cbe44a85dfa4628329875d2",
+  "git": {
+    "commit": "6fa8463f73f5740ac7f62a9d2daff9464b64d348",
+    "dirty": false
+  },
+  "suite": "train_distribution",
+  "protocol": "both",
+  "mode": "all",
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "carry_motion_ids": [
+    0,
+    1,
+    2
+  ],
+  "carry_phases": [
+    0.25,
+    0.5,
+    0.75
+  ],
+  "policy_dt": 0.019999999552965164,
+  "stable_required_steps": 11,
+  "warmup_steps": 10,
+  "measure_steps": 150,
+  "readiness_config": {
+    "stable_hold_s": 0.2,
+    "settle_timeout_s": 2.0,
+    "contact_force_n": 1.0,
+    "side_tolerance_m": 0.03,
+    "face_margin_m": 0.01,
+    "slip_tolerance_mps": 0.35,
+    "relative_velocity_tolerance_mps": [
+      0.35,
+      0.45,
+      0.45
+    ],
+    "box_drop_height_m": 0.15,
+    "robot_box_max_distance_m": 1.0,
+    "box_tilt_max_deg": 70.0
+  },
+  "frames": {
+    "planar": "pelvis_yaw",
+    "yaw_rate": "pelvis_world_z",
+    "box_planar": "pelvis_yaw"
+  },
+  "command_ranges": {
+    "vx": [
+      -0.6,
+      1.2
+    ],
+    "vy": [
+      -0.5,
+      0.5
+    ],
+    "yaw_rate": [
+      -0.7,
+      0.7
+    ],
+    "mixed": [
+      [
+        -0.6,
+        1.2
+      ],
+      [
+        -0.5,
+        0.5
+      ],
+      [
+        -0.7,
+        0.7
+      ]
+    ]
+  },
+  "command_case_note": "deterministic training-range coverage, not an unbiased distribution estimate",
+  "command_line": [
+    "experiments/carrybox_locomotion_eval/evaluator.py",
+    "--resume_path",
+    "legged_gym/logs/carrybox_locomotion/Sep26_01-06-53_full_mixed_se2/model_19999.pt",
+    "--suite",
+    "train_distribution",
+    "--protocol",
+    "both",
+    "--mode",
+    "all",
+    "--seeds",
+    "1",
+    "2",
+    "3",
+    "--carry_motion_ids",
+    "0",
+    "1",
+    "2",
+    "--carry_phases",
+    "0.25",
+    "0.5",
+    "0.75",
+    "--stable_hold",
+    "0.20",
+    "--settle_timeout",
+    "2.0",
+    "--warmup",
+    "0.20",
+    "--duration",
+    "3.0",
+    "--save_csv",
+    "--headless"
+  ],
+  "number_of_attempts": 1512
+}
