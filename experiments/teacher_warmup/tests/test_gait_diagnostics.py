@@ -212,6 +212,36 @@ def test_strict_checkpoint_contract_rejects_original_and_mismatch():
         validate_a5_contract(trained_elsewhere, spec, "teacher", "reference", evaluated, NAMES, .25, .02, {"scales": {"test": 2}})
 
 
+@pytest.mark.parametrize("saved_dt,requested_dt,valid", [
+    (.019999999552965164, .02, True),
+    (.02, .019999999552965164, True),
+    (.01, .02, False),
+    (.04, .02, False),
+    (.02000001, .02, False),
+    (float("nan"), .02, False),
+    (float("inf"), .02, False),
+    (None, .02, False),
+    (-.02, -.02, False),
+])
+def test_contract_dt_float32_precision_and_real_mismatches(saved_dt, requested_dt, valid):
+    handoff = dict(ablation="A5", warmup_vx=.8, fixed_command=[.8, 0., 0.], command_suite="fixed",
+                   adapter="rate_limited", target_rate_arms=2., target_rate_waist=1.5,
+                   target_rate_legs=12., joint_target_rates=None)
+    contract = dict(teacher_sha256="teacher", reference_sha256="reference", handoff=handoff,
+                    dof_names=NAMES, dt=saved_dt, action_scale=.25, actor_obs=738,
+                    rewards=dict(scales={"test": 1}))
+    checkpoint = dict(iter=5000, handoff_contract=contract)
+    args = (checkpoint, dict(dims=[738, 512, 256, 256, 29]), "teacher", "reference", handoff,
+            NAMES, .25, requested_dt)
+    before = copy.deepcopy(checkpoint)
+    if valid:
+        validate_a5_contract(*args)
+        assert checkpoint == before
+    else:
+        with pytest.raises(ValueError, match=r"mismatch: dt \(checkpoint=.*requested="):
+            validate_a5_contract(*args)
+
+
 def trace_rows():
     env, diag = fixture()
     rows = []

@@ -280,13 +280,18 @@ def test_b2_exact_provenance_guard_before_simulator(tmp_path, monkeypatch):
     for key in ("teacher_checkpoint", "posture_reference"):
         handoff.pop(key)
     handoff.update(warmup_vx=.4, fixed_command=[.4, 0., 0.])
+    # Reproduce Gym's float32 SimParams.dt -> Python policy period boundary.
+    import ctypes
     saved = dict(handoff=handoff, teacher_sha256=file_sha256(teacher), reference_sha256=file_sha256(reference),
-                 dof_names=NAMES, action_scale=.25, dt=.02, actor_obs=738, critic_obs=160,
+                 dof_names=NAMES, action_scale=.25, dt=ctypes.c_float(.005).value*4, actor_obs=738, critic_obs=160,
                  rewards=rewards, algorithm=config_dict(train.algorithm),
                  policy=dict(config_dict(train.policy), actor_hidden_dims=[512, 256, 256], activation="elu"),
                  environment={key: config_dict(getattr(cfg, key)) for key in
                               ("control", "normalization", "domain_rand", "asset", "commands", "dataset", "sim",
                                "noise", "terrain", "init_state")})
+    # Real runner manifests are written after _parse_cfg adds this field.
+    saved["environment"]["domain_rand"]["push_interval"] = math.ceil(
+        cfg.domain_rand.push_interval_s / saved["dt"])
     state = {"std": torch.ones(29), "critic.0.weight": torch.zeros(256, 160)}
     dims = [738, 512, 256, 256, 29]
     for i, (a, b) in enumerate(zip(dims, dims[1:])):

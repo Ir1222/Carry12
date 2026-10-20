@@ -40,6 +40,7 @@ Modified:
 4. `legged_gym/legged_gym/scripts/eval_teacher_warmup_loco.py`
 5. `legged_gym/legged_gym/scripts/gait_diagnostics.py`
 6. `legged_gym/legged_gym/scripts/analyze_gait_diagnostics.py`
+7. `experiments/teacher_warmup/tests/test_gait_diagnostics.py` (startup precision regression checks)
 
 Added:
 
@@ -152,6 +153,17 @@ and synthetic analysis/curve export. Existing supervisor/runner tests also run.
 Synthetic fixtures are confined to tests and are not physical evidence.
 Physical disabled/enabled trajectory equivalence, Actor initialization against
 the real A5 file, and Teacher pickup stability remain pending on Linux.
+
+Startup compatibility fix: the config's Python `.005 * 4` is `.02`, whereas
+float32 SimParams can produce `.019999999552965164` in the saved runtime
+contract. The contract check and runtime 50-Hz guard now accept at most 1 ns
+absolute representation error, with zero relative tolerance. They still reject
+real timestep differences and never rewrite simulation settings or checkpoints.
+Contract failures now report checkpoint/requested values. The pre-simulator
+environment comparison also reconstructs the `push_interval` snapshot field
+that the original `_parse_cfg` adds after initialization; it does not modify
+the actual configuration. Regression tests cover both precision directions,
+invalid periods and realistic post-initialization A5 metadata.
 
 ## Commands prepared for the target machine (not executed here)
 

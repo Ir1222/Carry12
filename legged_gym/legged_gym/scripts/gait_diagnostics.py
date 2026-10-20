@@ -381,8 +381,19 @@ def validate_a5_contract(checkpoint, spec, teacher_hash, reference_hash, handoff
             raise ValueError("Diagnostic handoff differs from trained A5: " + key
                              + " (checkpoint=" + repr(value) + ", evaluation=" + repr(handoff.get(key)) + ")")
     for key, expected in (("dof_names", list(names)), ("action_scale", scale), ("dt", dt), ("actor_obs", 738)):
-        if contract.get(key) != expected:
-            raise ValueError("A5 action/observation contract mismatch: " + key)
+        actual = contract.get(key)
+        # SimParams stores dt as float32, while the Python config uses a
+        # double: .005 * 4 becomes .019999999552965164 in the saved runner.
+        # Allow at most 1 ns of representation error; never change physics dt.
+        if key == "dt":
+            matches = (isinstance(actual, (int, float)) and isinstance(expected, (int, float))
+                       and actual > 0 and expected > 0 and math.isfinite(actual) and math.isfinite(expected)
+                       and math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-9))
+        else:
+            matches = actual == expected
+        if not matches:
+            raise ValueError("A5 action/observation contract mismatch: " + key
+                             + " (checkpoint=" + repr(actual) + ", requested=" + repr(expected) + ")")
     def normalized_reward_contract(value):
         import copy
         result = copy.deepcopy(value)

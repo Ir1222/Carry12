@@ -1,0 +1,41 @@
+--- a/legged_gym/legged_gym/scripts/train_teacher_warmup_loco.py
++++ b/legged_gym/legged_gym/scripts/train_teacher_warmup_loco.py
+@@ -4,2 +4,3 @@
+ import json
++import math
+ from pathlib import Path
+@@ -128,2 +129,8 @@
+                             "noise", "terrain", "init_state")}
++    # A5 records its config AFTER _parse_cfg has added this derived step count.
++    # Reconstruct the snapshot field for this pre-simulator comparison only;
++    # the actual environment still derives it through the original _parse_cfg.
++    if "push_interval" in (contract.get("environment") or {}).get("domain_rand", {}):
++        current_environment["domain_rand"]["push_interval"] = math.ceil(
++            env_cfg.domain_rand.push_interval_s / contract["dt"])
+     if contract.get("environment") != current_environment:
+@@ -184,3 +191,4 @@
+               f"critic={env.num_privileged_obs} actions={env.num_actions} seed={train_cfg.seed}")
+-        if (env.dt != .02 or env.num_obs != 738 or env.num_actions != 29 or env.num_privileged_obs != 160
++        if (not math.isclose(env.dt, .02, rel_tol=0.0, abs_tol=1e-9)
++                or env.num_obs != 738 or env.num_actions != 29 or env.num_privileged_obs != 160
+                 or env.num_envs != 512 or env.cfg.seed != 1):
+--- a/legged_gym/legged_gym/scripts/gait_diagnostics.py
++++ b/legged_gym/legged_gym/scripts/gait_diagnostics.py
+@@ -383,4 +383,15 @@
+     for key, expected in (("dof_names", list(names)), ("action_scale", scale), ("dt", dt), ("actor_obs", 738)):
+-        if contract.get(key) != expected:
+-            raise ValueError("A5 action/observation contract mismatch: " + key)
++        actual = contract.get(key)
++        # SimParams stores dt as float32, while the Python config uses a
++        # double: .005 * 4 becomes .019999999552965164 in the saved runner.
++        # Allow at most 1 ns of representation error; never change physics dt.
++        if key == "dt":
++            matches = (isinstance(actual, (int, float)) and isinstance(expected, (int, float))
++                       and actual > 0 and expected > 0 and math.isfinite(actual) and math.isfinite(expected)
++                       and math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-9))
++        else:
++            matches = actual == expected
++        if not matches:
++            raise ValueError("A5 action/observation contract mismatch: " + key
++                             + " (checkpoint=" + repr(actual) + ", requested=" + repr(expected) + ")")
+     def normalized_reward_contract(value):

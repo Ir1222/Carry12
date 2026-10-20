@@ -68,5 +68,15 @@
     "User declined shared-machine SSH; no remote execution attempted.",
     "Disabled-feature equivalence is supported by CPU integration checks and unchanged source contracts; physical trajectory equivalence remains unverified."
   ],
-  "prepared_execution_commands": "experiments/teacher_warmup/B2_GAIT.md"
+  "prepared_execution_commands": "experiments/teacher_warmup/B2_GAIT.md",
+  "startup_dt_fix": {
+    "tests": "61 passed in 21.36s",
+    "regressions_added": 9,
+    "static_checks": "py_compile and git diff --check passed",
+    "dt_tolerance_s": 1e-09,
+    "relative_tolerance": 0,
+    "simulation_executed": false,
+    "checkpoint_modified": false,
+    "portable_patch": "experiments\\teacher_warmup\\fix_B2_startup_dt.patch"
+  }
 }

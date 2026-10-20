@@ -2,6 +2,7 @@
 import argparse
 from datetime import datetime
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -126,6 +127,12 @@ def validate_b2_initialization(env_cfg, train_cfg, own, args):
     current_environment = {key: class_to_dict(getattr(env_cfg, key)) for key in
                            ("control", "normalization", "domain_rand", "asset", "commands", "dataset", "sim",
                             "noise", "terrain", "init_state")}
+    # A5 records its config AFTER _parse_cfg has added this derived step count.
+    # Reconstruct the snapshot field for this pre-simulator comparison only;
+    # the actual environment still derives it through the original _parse_cfg.
+    if "push_interval" in (contract.get("environment") or {}).get("domain_rand", {}):
+        current_environment["domain_rand"]["push_interval"] = math.ceil(
+            env_cfg.domain_rand.push_interval_s / contract["dt"])
     if contract.get("environment") != current_environment:
         raise ValueError("B2 environment/control differs from saved A5")
     result = dict(student_checkpoint=str(exact["student"].resolve()), student_sha256=file_sha256(exact["student"]),
@@ -182,7 +189,8 @@ def main():
             cfg["environment_contract"]["b2_initialization"] = provenance
         print(f"[B2 effective] num_envs={env.num_envs} dt={env.dt} obs={env.num_obs} "
               f"critic={env.num_privileged_obs} actions={env.num_actions} seed={train_cfg.seed}")
-        if (env.dt != .02 or env.num_obs != 738 or env.num_actions != 29 or env.num_privileged_obs != 160
+        if (not math.isclose(env.dt, .02, rel_tol=0.0, abs_tol=1e-9)
+                or env.num_obs != 738 or env.num_actions != 29 or env.num_privileged_obs != 160
                 or env.num_envs != 512 or env.cfg.seed != 1):
             raise ValueError("B2 runtime observation/action/control contract mismatch")
     root = Path(LEGGED_GYM_ROOT_DIR) / "logs" / train_cfg.runner.experiment_name
