@@ -1,0 +1,12 @@
+{
+  "status": "blocked_preflight",
+  "simulation_executed": false,
+  "measured_episodes": 0,
+  "gait_metrics": null,
+  "blockers": [
+    "No trained A5 checkpoint with handoff_contract found in repository (including ignored logs)",
+    "Exact A5 Teacher posture reference JSON unavailable; no reference is synthesized",
+    "Isaac Gym import unavailable in selected interpreter: ModuleNotFoundError: No module named 'isaacgym'",
+    "CUDA unavailable in selected interpreter (torch=2.6.0+cpu)"
+  ]
+}

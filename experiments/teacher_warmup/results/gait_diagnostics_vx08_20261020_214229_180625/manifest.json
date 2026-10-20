@@ -1,0 +1,274 @@
+{
+  "status": "blocked_preflight",
+  "experiment": 0,
+  "simulation_executed": false,
+  "training_executed": false,
+  "requested_episodes": 20,
+  "teacher_checkpoint": "D:\\AAAProject\\0806\\PhysHSI\\shared_artifacts\\2026-10-19\\carry_track\\model_33999.pt",
+  "teacher_sha256": "1a7adf066916d19f45d92ac5b564fbd0a21c0401a3b91fe1d5df0111e45c4ded",
+  "student_checkpoint": null,
+  "posture_reference": null,
+  "configuration": {
+    "handoff": {
+      "ablation": "A5",
+      "warmup_vx": 0.8,
+      "fixed_command": [
+        0.8,
+        0.0,
+        0.0
+      ],
+      "command_suite": "fixed",
+      "adapter": "rate_limited"
+    }
+  },
+  "interpreter": "D:\\Anaconda3\\python.exe",
+  "python": "3.11.3 | packaged by Anaconda, Inc. | (main, Apr 19 2023, 23:46:34) [MSC v.1916 64 bit (AMD64)]",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "torch_version": "2.6.0+cpu",
+  "torch_cuda": null,
+  "cuda_available": false,
+  "isaacgym_probe": {
+    "returncode": 1,
+    "stdout": "",
+    "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'isaacgym'\n"
+  },
+  "checkpoint_inventory": [
+    {
+      "path": "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\logs\\carry_track\\model_33999.pt",
+      "bytes": 15444098,
+      "iteration": 34000,
+      "sha256": "1a7adf066916d19f45d92ac5b564fbd0a21c0401a3b91fe1d5df0111e45c4ded",
+      "actor_input": 738,
+      "actor_output": 29,
+      "ablation": null,
+      "teacher_sha256": null,
+      "reference_sha256": null,
+      "has_handoff_contract": false,
+      "modified_ns": 1792046921546649300
+    },
+    {
+      "path": "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\logs\\Jul06_from_41000\\model_41000.pt",
+      "bytes": 15548546,
+      "iteration": 41001,
+      "sha256": "9940e621c9f4c267292e1268191a96c2621d7056fb0d2f05cd2cc9914c06d364",
+      "actor_input": 738,
+      "actor_output": 29,
+      "ablation": null,
+      "teacher_sha256": null,
+      "reference_sha256": null,
+      "has_handoff_contract": false,
+      "modified_ns": 1784991395102244500
+    },
+    {
+      "path": "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\logs\\Jul06_from_41000\\model_55500.pt",
+      "bytes": 15548546,
+      "iteration": 55500,
+      "sha256": "e15c6e69700ee75c0b9a5e5efc9d402c97091b8ddcbdab4f37d4dd83daf37fd5",
+      "actor_input": 738,
+      "actor_output": 29,
+      "ablation": null,
+      "teacher_sha256": null,
+      "reference_sha256": null,
+      "has_handoff_contract": false,
+      "modified_ns": 1784991395150802000
+    },
+    {
+      "path": "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\logs\\Jul09_from_55500\\model_73500.pt",
+      "bytes": 15548610,
+      "iteration": 73500,
+      "sha256": "9b7c32dea0498af448bedf67af1f6ef21d6937faed0af35a1caaac58eede4c45",
+      "actor_input": 738,
+      "actor_output": 29,
+      "ablation": null,
+      "teacher_sha256": null,
+      "reference_sha256": null,
+      "has_handoff_contract": false,
+      "modified_ns": 1784991395199229800
+    },
+    {
+      "path": "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\logs\\recarry\\model_19999.pt",
+      "bytes": 15443465,
+      "iteration": 20000,
+      "sha256": "f98ae2c4f1fb3b1445fdfedcddef3fe108fb779abbb214a862f318995667d713",
+      "actor_input": 738,
+      "actor_output": 29,
+      "ablation": null,
+      "teacher_sha256": null,
+      "reference_sha256": null,
+      "has_handoff_contract": false,
+      "modified_ns": 1785923294726999500
+    },
+    {
+      "path": "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\logs\\track_vel\\fina\\model_19999 (2).pt",
+      "bytes": 10164650,
+      "iteration": 20000,
+      "sha256": "1b537657e61495dcd76f60b3c5d624825549a2d41cbe44a85dfa4628329875d2",
+      "actor_input": 738,
+      "actor_output": 29,
+      "ablation": null,
+      "teacher_sha256": null,
+      "reference_sha256": null,
+      "has_handoff_contract": false,
+      "modified_ns": 1792046860571173400
+    },
+    {
+      "path": "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\logs\\track_vel\\track_handsbad\\model_19999 (2).pt",
+      "bytes": 10164650,
+      "iteration": 20000,
+      "sha256": "18165eb28f8c23f4853a3c6953542d03251eb363dbd873c0b43f924b3e872345",
+      "actor_input": 738,
+      "actor_output": 29,
+      "ablation": null,
+      "teacher_sha256": null,
+      "reference_sha256": null,
+      "has_handoff_contract": false,
+      "modified_ns": 1792047543055118300
+    },
+    {
+      "path": "D:\\AAAProject\\0806\\PhysHSI\\shared_artifacts\\2026-10-19\\carry_track\\model_33999.pt",
+      "bytes": 15444098,
+      "iteration": 34000,
+      "sha256": "1a7adf066916d19f45d92ac5b564fbd0a21c0401a3b91fe1d5df0111e45c4ded",
+      "actor_input": 738,
+      "actor_output": 29,
+      "ablation": null,
+      "teacher_sha256": null,
+      "reference_sha256": null,
+      "has_handoff_contract": false,
+      "modified_ns": 1792046921546649300
+    },
+    {
+      "path": "D:\\AAAProject\\0806\\PhysHSI\\shared_artifacts\\2026-10-19\\track_vel_fina\\model_19999 (2).pt",
+      "bytes": 10164650,
+      "iteration": 20000,
+      "sha256": "1b537657e61495dcd76f60b3c5d624825549a2d41cbe44a85dfa4628329875d2",
+      "actor_input": 738,
+      "actor_output": 29,
+      "ablation": null,
+      "teacher_sha256": null,
+      "reference_sha256": null,
+      "has_handoff_contract": false,
+      "modified_ns": 1792046860571173400
+    }
+  ],
+  "checkpoint_search_root": "D:\\AAAProject\\0806\\PhysHSI",
+  "geometry": {
+    "left_ankle_pitch_link": {
+      "bounds": [
+        [
+          -0.02449999935925007,
+          -0.006442185025662184,
+          -0.02455790899693966
+        ],
+        [
+          0.01150001771748066,
+          0.006557829678058624,
+          0.012889973819255829
+        ]
+      ],
+      "sole_centroid_local": [
+        -0.009193579503335058,
+        5.7820578149403445e-05,
+        -0.02413114532828331
+      ],
+      "vertex_count": 714,
+      "meshes": [
+        "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\resources\\robots\\g1\\meshes\\left_ankle_pitch_link.STL"
+      ]
+    },
+    "left_ankle_roll_link": {
+      "bounds": [
+        [
+          -0.06584136933088303,
+          -0.03774179145693779,
+          -0.035409145057201385
+        ],
+        [
+          0.14236535131931305,
+          0.03784090280532837,
+          0.023583902046084404
+        ]
+      ],
+      "sole_centroid_local": [
+        0.06873598298781969,
+        -0.00038610574209557236,
+        -0.03509222801210972
+      ],
+      "vertex_count": 6543,
+      "meshes": [
+        "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\resources\\robots\\g1\\meshes\\left_ankle_roll_link.STL"
+      ]
+    },
+    "right_ankle_pitch_link": {
+      "bounds": [
+        [
+          -0.02449999935925007,
+          -0.006557829678058624,
+          -0.02455790899693966
+        ],
+        [
+          0.01150001771748066,
+          0.006442185025662184,
+          0.012889973819255829
+        ]
+      ],
+      "sole_centroid_local": [
+        -0.009193579503335058,
+        -5.7820578149403445e-05,
+        -0.02413114532828331
+      ],
+      "vertex_count": 714,
+      "meshes": [
+        "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\resources\\robots\\g1\\meshes\\right_ankle_pitch_link.STL"
+      ]
+    },
+    "right_ankle_roll_link": {
+      "bounds": [
+        [
+          -0.06584136933088303,
+          -0.03784090280532837,
+          -0.035409145057201385
+        ],
+        [
+          0.14236535131931305,
+          0.03774179145693779,
+          0.023583902046084404
+        ]
+      ],
+      "sole_centroid_local": [
+        0.06937282508266951,
+        0.0002189709424973403,
+        -0.035095030558643055
+      ],
+      "vertex_count": 6547,
+      "meshes": [
+        "D:\\AAAProject\\0806\\PhysHSI\\legged_gym\\resources\\robots\\g1\\meshes\\right_ankle_roll_link.STL"
+      ]
+    }
+  },
+  "settings": {
+    "contact_threshold_N": 1.0,
+    "contact_filter": "current OR previous raw; reset on episode/owner change",
+    "combined_contact": "pitch OR roll",
+    "min_valid_swing_s": 0.04,
+    "near_ground_m": 0.02,
+    "scuff_horizontal_speed_m_s": 0.1,
+    "clearance": "minimum rotated collision-mesh vertex Z above plane Z=0",
+    "slip": "integral of sole-centroid horizontal speed during combined filtered contact; rolling is included",
+    "time_windows": "pre-step control_phase; carry windows use time since first student control, including transition"
+  },
+  "blockers": [
+    "No trained A5 checkpoint with handoff_contract found in repository (including ignored logs)",
+    "Exact A5 Teacher posture reference JSON unavailable; no reference is synthesized",
+    "Isaac Gym import unavailable in selected interpreter: ModuleNotFoundError: No module named 'isaacgym'",
+    "CUDA unavailable in selected interpreter (torch=2.6.0+cpu)"
+  ],
+  "git_revision": "46f23fddafbf84901fd865aa9dcc8c9d70b8f30c",
+  "source_sha256": {
+    "legged_gym\\legged_gym\\scripts\\gait_diagnostics.py": "c6b00f2bf7e11cbdd9c43734b2eef288e1629071d0036b4c2b22bb37812d4499",
+    "legged_gym\\legged_gym\\scripts\\analyze_gait_diagnostics.py": "32dca075dff6e3b14597be70db5cbe7933c4d64743fe164d629677a2bdb814e4",
+    "legged_gym\\legged_gym\\scripts\\eval_teacher_warmup_loco.py": "531ed35bb8d2427f63f0f9cad14c678fb3da5ec149c91f38a9b6c1b4b534ff73",
+    "legged_gym\\legged_gym\\envs\\g1\\carrybox_teacher_warmup.py": "975a67bfca523709fe95321363d5e86437c3339510b32d3d2e7d5374ff637943",
+    "experiments\\teacher_warmup\\diagnose_g1_gait.py": "93f5e5422c266bfc0f6564832fa6b4cf64e00e174cef05e3820fa2c053140ddb"
+  }
+}

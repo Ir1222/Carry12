@@ -272,6 +272,8 @@ class LeggedRobot(CarryLocomotion):
             "posture_error": pose_error.clone(),
             **{k: v.clone() for k, v in self.step_diagnostics.items()},
         }
+        if getattr(self, "gait_diagnostics", None) is not None:
+            self.gait_diagnostics.capture_state(self)
 
     def _reward_carry_upper_body_pose(self):
         if self.pose_reference is None:
@@ -308,6 +310,8 @@ class LeggedRobot(CarryLocomotion):
         applied = adapt_action(desired, self.actions, self.rates, self.dt,
                                self.cfg.control.action_scale, self.cfg.normalization.clip_actions,
                                self.control_mask, h.adapter)
+        if getattr(self, "gait_diagnostics", None) is not None:
+            self.gait_diagnostics.capture_action(self, desired, applied)
         # Capture diagnostics before FullCarryBox auto-resets done environments.
         self.applied_action.copy_(applied)
         self.applied_pd_target.copy_(self.default_dof_pos + applied * self.cfg.control.action_scale)

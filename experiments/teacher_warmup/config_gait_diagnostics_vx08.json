@@ -1,0 +1,9 @@
+{
+  "handoff": {
+    "ablation": "A5",
+    "warmup_vx": 0.8,
+    "fixed_command": [0.8, 0.0, 0.0],
+    "command_suite": "fixed",
+    "adapter": "rate_limited"
+  }
+}

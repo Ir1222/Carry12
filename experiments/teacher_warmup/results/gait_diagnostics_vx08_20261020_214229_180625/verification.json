@@ -1,0 +1,47 @@
+{
+  "experiment": 0,
+  "date_local": "2026-10-20",
+  "timezone": "Asia/Shanghai",
+  "branch": "research/teacher-warmup-handoff",
+  "baseline_tests": {
+    "command": "python -m pytest experiments/teacher_warmup/tests -q",
+    "result": "27 passed in 7.46s (before diagnostic implementation)"
+  },
+  "final_tests": {
+    "command": "python -m pytest experiments/teacher_warmup/tests -q",
+    "result": "38 passed in 14.91s",
+    "new_diagnostic_tests": 11,
+    "physics_simulated": false
+  },
+  "static_checks": [
+    "git diff --check: passed",
+    "python -m py_compile legged_gym/legged_gym/scripts/gait_diagnostics.py legged_gym/legged_gym/scripts/analyze_gait_diagnostics.py legged_gym/legged_gym/scripts/eval_teacher_warmup_loco.py experiments/teacher_warmup/diagnose_g1_gait.py: passed",
+    "Python 3.8 syntax compatibility checked by CPU test",
+    "Enabled/disabled real supervisor action and reward methods produce identical actions, observations, rewards and RNG in CPU fixtures",
+    "No simulator mutation API calls in diagnostic module",
+    "Synthetic analysis produced and verified all four PNG files in temporary test directories"
+  ],
+  "preflight": {
+    "command": "python experiments/teacher_warmup/diagnose_g1_gait.py --preflight_only",
+    "exit_code": 2,
+    "checkpoint_files_inspected": 9,
+    "checkpoint_read_errors": 0,
+    "trained_A5_candidates": 0,
+    "measured_physical_episodes": 0,
+    "student_actor_contract_verified": false,
+    "physical_trajectory_equivalence_verified": false
+  },
+  "environment_checks": {
+    "default_python": "D:/Anaconda3/python.exe; torch 2.6.0+cpu; CUDA unavailable; Isaac Gym missing",
+    "gym38_python": "D:/Anaconda3/envs/gym38/python.exe; torch 2.4.1+cpu; CUDA unavailable; Isaac Gym missing",
+    "tf_python": "Isaac Gym missing",
+    "dts209tc_python": "Isaac Gym and torch missing",
+    "nvidia_smi": "not found on PATH",
+    "wsl": "no installed Linux distribution reported"
+  },
+  "simulator_commands_executed": [],
+  "simulator_commands_prepared": "commands.json: 3-episode smoke; then 10 episodes each for seeds 1 and 2, gated on smoke completion",
+  "training_or_finetuning_executed": false,
+  "checkpoint_modified": false,
+  "github_push_executed": false
+}
