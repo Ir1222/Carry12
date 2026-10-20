@@ -61,7 +61,12 @@ Do not use `--collect_teacher`.
 
 `config_gait_diagnostics_vx08.json` explicitly fixes Teacher warmup vx=0.8,
 Student command [0.8,0,0], suite=fixed, ablation=A5 and adapter=rate_limited.
-All saved handoff settings except the evaluation carry duration must match;
+Evaluation carry duration, Teacher warmup vx, fixed command and command suite
+may deliberately differ from checkpoint training conditions. Diagnostics still
+require evaluation warmup vx=0.8, fixed command [0.8,0,0] and suite=fixed. Any
+differences are printed and recorded in `evaluation_handoff_overrides` alongside
+`checkpoint_handoff`; they are not changes to the policy weights. All remaining
+saved handoff settings must match;
 Teacher hash, reference hash, 738D/29D actor, joint order, action scale, dt,
 and the entire reward/posture configuration must also match.
 

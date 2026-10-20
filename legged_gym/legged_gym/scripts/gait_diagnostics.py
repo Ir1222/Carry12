@@ -272,6 +272,13 @@ class GaitDiagnostics:
         return result
 
 
+def evaluation_handoff_overrides(saved, evaluated):
+    """Record deliberate evaluation conditions; never alter the saved contract."""
+    keys = ("student_timeout_s", "warmup_vx", "fixed_command", "command_suite")
+    return {key: {"checkpoint": saved.get(key), "evaluation": evaluated.get(key)}
+            for key in keys if saved.get(key) != evaluated.get(key)}
+
+
 def validate_a5_contract(checkpoint, spec, teacher_hash, reference_hash, handoff, names, scale, dt, rewards=None):
     """Fail closed; an original locomotion checkpoint is never an A5 substitute."""
     contract = checkpoint.get("handoff_contract")
@@ -291,10 +298,14 @@ def validate_a5_contract(checkpoint, spec, teacher_hash, reference_hash, handoff
                           ("command_suite", "fixed"), ("adapter", "rate_limited")):
         if handoff.get(key) != expected:
             raise ValueError("Diagnostic configuration requires " + key + "=" + str(expected))
-    # Duration alone may differ for a short evaluation. Preserve all other A5 settings.
+    # This experiment deliberately evaluates vx=0.8, even if the checkpoint
+    # records another training command. The fixed vx=0.8 guards above still
+    # apply. These are evaluation conditions, not action-adapter settings.
+    evaluation_keys = ("student_timeout_s", "warmup_vx", "fixed_command", "command_suite")
     for key, value in saved.items():
-        if key != "student_timeout_s" and handoff.get(key) != value:
-            raise ValueError("Diagnostic handoff differs from trained A5: " + key)
+        if key not in evaluation_keys and handoff.get(key) != value:
+            raise ValueError("Diagnostic handoff differs from trained A5: " + key
+                             + " (checkpoint=" + repr(value) + ", evaluation=" + repr(handoff.get(key)) + ")")
     for key, expected in (("dof_names", list(names)), ("action_scale", scale), ("dt", dt), ("actor_obs", 738)):
         if contract.get(key) != expected:
             raise ValueError("A5 action/observation contract mismatch: " + key)

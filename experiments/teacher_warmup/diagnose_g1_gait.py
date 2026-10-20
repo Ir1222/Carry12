@@ -94,9 +94,10 @@ def main():
                        for name, g in geometry.items()}
     # Full strict contract/config validation is also performed before stepping
     # physics by the evaluator. Here validate the available artifacts on CPU.
+    evaluation_overrides = {}
     if student_exists and own.posture_reference and Path(own.posture_reference).is_file():
         try:
-            from gait_diagnostics import validate_a5_contract
+            from gait_diagnostics import validate_a5_contract, evaluation_handoff_overrides
             from rsl_rl.teacher_handoff_reference import validate_reference
             ckpt = read_checkpoint(own.student_checkpoint)
             contract = ckpt.get("handoff_contract") or {}
@@ -110,6 +111,7 @@ def main():
             requested.update(json.loads(Path(own.handoff_config).read_text())["handoff"])
             validate_a5_contract(ckpt, spec, teacher_hash, file_sha256(own.posture_reference), requested,
                                  names, .25, .02, contract.get("rewards"))
+            evaluation_overrides = evaluation_handoff_overrides(contract["handoff"], requested)
             del actor, ckpt
         except Exception as error:
             blockers.append("A5 artifact validation failed: " + str(error))
@@ -122,7 +124,8 @@ def main():
                     torch_version=torch.__version__, torch_cuda=torch.version.cuda,
                     cuda_available=torch.cuda.is_available(), isaacgym_probe=dict(returncode=probe.returncode,
                     stdout=probe.stdout, stderr=probe.stderr), checkpoint_inventory=inventory,
-                    checkpoint_search_root=str(ROOT), geometry=geometry_report, settings=SETTINGS, blockers=blockers)
+                    checkpoint_search_root=str(ROOT), geometry=geometry_report, settings=SETTINGS, blockers=blockers,
+                    evaluation_handoff_overrides=evaluation_overrides)
     revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(ROOT), capture_output=True, text=True)
     manifest["git_revision"] = revision.stdout.strip() if revision.returncode == 0 else None
     sources = [SCRIPTS / f for f in ("gait_diagnostics.py", "analyze_gait_diagnostics.py", "eval_teacher_warmup_loco.py")]

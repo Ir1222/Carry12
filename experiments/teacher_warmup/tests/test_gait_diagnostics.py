@@ -13,7 +13,8 @@ import torch
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "legged_gym/legged_gym/scripts"))
 sys.path.insert(0, str(ROOT / "rsl_rl"))
-from gait_diagnostics import GaitDiagnostics, foot_geometry, rotate, validate_a5_contract, window, WINDOWS
+from gait_diagnostics import (GaitDiagnostics, foot_geometry, rotate, validate_a5_contract,
+                              evaluation_handoff_overrides, window, WINDOWS)
 from analyze_gait_diagnostics import Bucket, analyze_gait
 from rsl_rl.teacher_handoff import adapt_action, joint_groups
 
@@ -188,6 +189,27 @@ def test_strict_checkpoint_contract_rejects_original_and_mismatch():
     changed = dict(handoff, warmup_vx=.4)
     with pytest.raises(ValueError, match="warmup_vx"):
         validate_a5_contract(ckpt, spec, "teacher", "reference", changed, NAMES, .25, .02)
+    # The reported regression: training command metadata need not be the
+    # requested vx=0.8 evaluation condition. Keep the saved checkpoint intact.
+    trained_elsewhere = copy.deepcopy(ckpt)
+    saved = trained_elsewhere["handoff_contract"]["handoff"]
+    saved.update(fixed_command=[.4, 0., 0.], warmup_vx=.4, command_suite="mixed", student_timeout_s=45.)
+    before = copy.deepcopy(trained_elsewhere)
+    evaluated = dict(handoff, student_timeout_s=30.)
+    validate_a5_contract(trained_elsewhere, spec, "teacher", "reference", evaluated, NAMES, .25, .02, contract["rewards"])
+    overrides = evaluation_handoff_overrides(saved, evaluated)
+    assert overrides["fixed_command"] == dict(checkpoint=[.4, 0., 0.], evaluation=[.8, 0., 0.])
+    assert overrides["warmup_vx"] == dict(checkpoint=.4, evaluation=.8)
+    assert set(overrides) == {"fixed_command", "warmup_vx", "command_suite", "student_timeout_s"}
+    assert trained_elsewhere == before
+    # Evaluation overrides cannot bypass adapter, rate or transition contracts.
+    for key, value in (("adapter", "hard"), ("target_rate_legs", 6.), ("transition_duration_s", 2.)):
+        mismatch = copy.deepcopy(trained_elsewhere)
+        mismatch["handoff_contract"]["handoff"][key] = value
+        with pytest.raises(ValueError, match=key):
+            validate_a5_contract(mismatch, spec, "teacher", "reference", evaluated, NAMES, .25, .02, contract["rewards"])
+    with pytest.raises(ValueError, match="reward/posture"):
+        validate_a5_contract(trained_elsewhere, spec, "teacher", "reference", evaluated, NAMES, .25, .02, {"scales": {"test": 2}})
 
 
 def trace_rows():

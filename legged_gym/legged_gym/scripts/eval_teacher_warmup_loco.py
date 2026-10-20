@@ -83,7 +83,7 @@ def main():
             raise ValueError("Evaluation joint order/action scaling differs from training")
     gait = None
     if own.gait_diagnostics:
-        from gait_diagnostics import GaitDiagnostics, validate_a5_contract
+        from gait_diagnostics import GaitDiagnostics, validate_a5_contract, evaluation_handoff_overrides
         from isaacgym import gymapi
         from legged_gym import LEGGED_GYM_ROOT_DIR
         validate_a5_contract(read_checkpoint(own.student_checkpoint), spec,
@@ -108,12 +108,16 @@ def main():
                 "posture_reference": own.posture_reference or None,
                 "carry_seconds": own.carry_seconds}
     if gait is not None:
+        overrides = evaluation_handoff_overrides(saved_contract["handoff"], class_to_dict(env.cfg.handoff))
+        if overrides:
+            print("[Gait diagnostics] Explicit evaluation overrides: " + json.dumps(overrides, sort_keys=True))
         manifest.update(gait_diagnostics=gait.metadata(), status="running",
                         student_checkpoint=str(Path(own.student_checkpoint).resolve()),
                         teacher_checkpoint=str(Path(own.teacher_checkpoint).resolve()),
                         student_iteration=read_checkpoint(own.student_checkpoint)["iter"],
                         reference_sha256=file_sha256(own.posture_reference),
-                        rewards=class_to_dict(env.cfg.rewards))
+                        rewards=class_to_dict(env.cfg.rewards),
+                        checkpoint_handoff=saved_contract["handoff"], evaluation_handoff_overrides=overrides)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     base_fields = ["episode", "env", "time_s", "student_valid", "phase", "control_phase", "handoff_relative_s",
                    "ready", "pickup", "eligible", "warmup_s", "reason", "done",
