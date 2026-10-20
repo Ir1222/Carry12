@@ -54,9 +54,27 @@ class G1Cfg(LocoCfg):
         posture_box_size_tolerance_m = 0.04
         posture_penalty_cap = 10.0
 
+    class gait:
+        contact_threshold_N = 1.0
+        moving_threshold = 0.1
+        slip_tolerance_m_s = 0.05
+        horizontal_speed_scale_m_s = 0.30
+        target_height_m = 0.04
+        scuff_height_m = 0.02
+        air_time_min_s = 0.06
+        air_time_range_s = 0.20
+        geometry_max_points = 128
+        geometry_fit_tolerance_m = 0.0005
+        geometry_validation_tolerance_m = 0.001
+
     class rewards(LocoCfg.rewards):
         class scales(LocoCfg.rewards.scales):
             carry_upper_body_pose = 0.0
+            # Opt in through config_B2_gait_vx08.json; A5 is unchanged.
+            gait_foot_slip = 0.0
+            gait_swing_clearance = 0.0
+            gait_foot_scuff = 0.0
+            gait_air_time = 0.0
 
 
 class G1CfgPPO(LocoPPO):

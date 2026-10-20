@@ -1,0 +1,72 @@
+{
+  "date_local": "2026-10-20",
+  "timezone": "Asia/Shanghai",
+  "branch": "research/teacher-warmup-handoff",
+  "tests": {
+    "command": "python -m pytest experiments/teacher_warmup/tests -q",
+    "result": "52 passed in 14.93s",
+    "baseline_tests": 38,
+    "new_tests": 14,
+    "physical_simulation": false
+  },
+  "static_checks": {
+    "py_compile": "passed for eight modified/new runtime modules",
+    "git_diff_check": "passed",
+    "python38_syntax": "passed"
+  },
+  "protected_sources": {
+    "legged_gym/legged_gym/envs/g1/carrybox.py": {
+      "matches_HEAD_ignoring_line_endings": true,
+      "normalized_sha256": "35e5ec3022ec84797c50d20178fd88debd806d62a7fbacd7119b795effe92318"
+    },
+    "legged_gym/legged_gym/envs/g1/carrybox_config.py": {
+      "matches_HEAD_ignoring_line_endings": true,
+      "normalized_sha256": "fd00ad88cf27e334a7043fc99c9629fe00fce5419a1682cee6568929575b05e3"
+    },
+    "legged_gym/legged_gym/envs/g1/carrybox_locomotion.py": {
+      "matches_HEAD_ignoring_line_endings": true,
+      "normalized_sha256": "37166b564c215f923ef804dc239a65b48bd0f0ecf2922fc6f7b417ba1fe45c34"
+    },
+    "legged_gym/legged_gym/envs/g1/carrybox_locomotion_config.py": {
+      "matches_HEAD_ignoring_line_endings": true,
+      "normalized_sha256": "8863d9f6bb634722a6936914a63149f52e902468449db4e6a04b826064498d62"
+    },
+    "rsl_rl/rsl_rl/teacher_handoff.py": {
+      "matches_HEAD_ignoring_line_endings": true,
+      "normalized_sha256": "a523d41f765b7e55484bbfe3cce1cabade9f33d8a7410a26deaa48cbada6db30"
+    },
+    "rsl_rl/rsl_rl/runners/teacher_warmup_on_policy_runner.py": {
+      "matches_HEAD_ignoring_line_endings": true,
+      "normalized_sha256": "45a80b8fb8c6dc51169b3098abd28ef5d9a7a8d78394e96d1b79080e186d69b2"
+    },
+    "rsl_rl/rsl_rl/algorithms/teacher_warmup_ppo.py": {
+      "matches_HEAD_ignoring_line_endings": true,
+      "normalized_sha256": "0698abaea80656dca488603e2ec8123ecb481e7fb0fab4b5c6fa81ce8609401f"
+    },
+    "experiments/teacher_warmup/config_4090.json": {
+      "matches_HEAD_ignoring_line_endings": true,
+      "normalized_sha256": "a0421cbf1bbc79a6a5cacf084794750622d9ea9ce00dc407a170c9f43bda4d54"
+    }
+  },
+  "executed_commands": [
+    "python -m pytest experiments/teacher_warmup/tests -q",
+    "python experiments/teacher_warmup/b2_preflight.py --output experiments/teacher_warmup/results/B2_local_preflight_20261020",
+    "python -m py_compile <eight modified/new runtime modules>",
+    "git -c core.autocrlf=false diff --check"
+  ],
+  "simulation_commands_executed": [],
+  "training_commands_executed": [],
+  "training_run_directory": null,
+  "recommended_checkpoint": null,
+  "a5_sha256": null,
+  "a5_original_training_command": null,
+  "checkpoint_modified": false,
+  "github_push_executed": false,
+  "limitations": [
+    "Exact trained A5 checkpoint and upper-body reference are absent locally.",
+    "No Isaac Gym/CUDA in this workspace.",
+    "User declined shared-machine SSH; no remote execution attempted.",
+    "Disabled-feature equivalence is supported by CPU integration checks and unchanged source contracts; physical trajectory equivalence remains unverified."
+  ],
+  "prepared_execution_commands": "experiments/teacher_warmup/B2_GAIT.md"
+}

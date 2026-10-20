@@ -89,6 +89,53 @@ def foot_geometry(urdf):
     return result
 
 
+def build_gait_geometry(urdf, max_points=128, fit_tolerance=.0005, validation_tolerance=.001):
+    """One-time CPU compression; training transforms only these support points.
+
+    Greedily select real collision vertices using 2048 support directions.
+    Validate on an independent 8192-direction sphere. Errors are sampled
+    geometric errors, not a bound on PhysX's cooked collision/contact surface.
+    No RNG is consumed. The evaluation diagnostic retains its full mesh.
+    """
+    import hashlib
+
+    def directions(count):
+        i = np.arange(count) + .5
+        z = 1 - 2 * i / count
+        phi = i * np.pi * (3 - np.sqrt(5))
+        radius = np.sqrt(1 - z*z)
+        return np.stack((radius*np.cos(phi), radius*np.sin(phi), z), -1)
+
+    geometry = foot_geometry(urdf)
+    result = {}
+    for side in SIDES:
+        name = side + "_ankle_roll_link"
+        g = geometry[name]
+        vertices = g["vertices"]
+        support = directions(2048) @ vertices.T
+        exact = support.min(-1)
+        indices = [int(vertices[:, 2].argmin())]
+        estimate = support[:, indices[0]].copy()
+        while (estimate - exact).max() > fit_tolerance and len(indices) < max_points:
+            index = int(support[int((estimate - exact).argmax())].argmin())
+            indices.append(index)
+            estimate = np.minimum(estimate, support[:, index])
+        points = vertices[indices]
+        errors = []
+        for batch in np.array_split(directions(8192), 32):
+            errors.extend(((batch @ points.T).min(-1) - (batch @ vertices.T).min(-1)).tolist())
+        errors = np.maximum(errors, 0)
+        error = dict(max_m=float(errors.max()), mean_m=float(errors.mean()),
+                     p95_m=float(np.quantile(errors, .95)), validation_directions=8192)
+        if error["max_m"] > validation_tolerance:
+            raise ValueError("Gait geometry validation failed: " + name + " " + repr(error))
+        result[name] = dict(points=points.tolist(), full_vertex_count=len(vertices),
+                            point_count=len(points), error=error,
+                            mesh_sha256=[hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in g["meshes"]])
+    return dict(urdf_sha256=hashlib.sha256(Path(urdf).read_bytes()).hexdigest(),
+                method="greedy collision support vertices; independent sphere validation", bodies=result)
+
+
 def window(row):
     phase = int(row["control_phase"])
     if phase == 0:
@@ -105,7 +152,10 @@ def window(row):
 
 class GaitDiagnostics:
     """Capture at compute_reward, before FullCarryBox auto-reset mutates state."""
-    def __init__(self, env, urdf, gymapi):
+    def __init__(self, env, urdf, gymapi, contact_source="combined"):
+        if contact_source not in ("combined", "roll"):
+            raise ValueError("Unknown gait diagnostic contact source")
+        self.contact_source = contact_source
         if env.cfg.terrain.mesh_type != "plane":
             raise ValueError("Sole clearance currently requires the existing plane terrain")
         self.geometry = foot_geometry(urdf)
@@ -137,7 +187,10 @@ class GaitDiagnostics:
         for name, g in self.geometry.items():
             geometry[name] = {k: v for k, v in g.items() if k not in ("vertices", "sole")}
             geometry[name].update(sole_centroid_local=g["sole"].tolist(), vertex_count=len(g["vertices"]))
-        return dict(settings=SETTINGS, body_indices_domain_env=self.indices,
+        settings = dict(SETTINGS, contact_source=self.contact_source)
+        if self.contact_source == "roll":
+            settings["combined_contact"] = "roll only (B2 corrected source)"
+        return dict(settings=settings, body_indices_domain_env=self.indices,
                     legacy_feet_indices=self.legacy_indices, hand_indices_domain_env=self.hand_indices,
                     geometry=geometry,
                     limitations=["Net forces include all collision partners; ground pair is not identified.",
@@ -155,6 +208,8 @@ class GaitDiagnostics:
         self.state = dict(bodies=cpu(env.rigid_body_states), forces=cpu(env.contact_forces),
                           legacy_contact=cpu(env.contact_filt), legacy_first=cpu(env.first_contacts),
                           legacy_air=cpu(env.feet_air_time))
+        if getattr(env, "gait_enabled", False):
+            self.b2_clearance = cpu(env.gait_clearance)
         if any(not np.isfinite(v).all() for v in self.state.values()):
             raise ValueError("Nonfinite body/contact diagnostic")
         # Preserve the predicates actually used by the existing termination
@@ -216,7 +271,7 @@ class GaitDiagnostics:
                     ("fx", "fy", "fz", "force_norm", "contact_raw", "contact_filtered"),
                     (*force.tolist(), norm, int(raw), int(filtered)))})
                 old["raw"][name] = raw
-            contact = any(flags)
+            contact = flags[1] if self.contact_source == "roll" else any(flags)
             contacts.append(contact)
             prior = old["contact"].get(side)
             changed = prior is not None and contact != prior
@@ -279,6 +334,25 @@ def evaluation_handoff_overrides(saved, evaluated):
             for key in keys if saved.get(key) != evaluated.get(key)}
 
 
+def validate_b2_reward_contract(saved, current):
+    """Only four additive terms and three disabled legacy terms may differ."""
+    import copy
+    scales = {"gait_foot_slip": -.08, "gait_swing_clearance": .15, "gait_foot_scuff": -.08, "gait_air_time": .05}
+    if any(current["scales"].get(k) != v for k, v in scales.items()):
+        raise ValueError("B2 gait reward scales differ from the requested experiment")
+    legacy = ("feet_air_time", "feet_slip", "feet_clearance")
+    if any(current["scales"].get(k) != 0 for k in legacy):
+        raise ValueError("B2 must disable only the three legacy foot rewards")
+    values = [copy.deepcopy(v) for v in (saved, current)]
+    for value in values:
+        for key in set(scales) | set(legacy):
+            value["scales"].pop(key, None)
+    if values[0] != values[1]:
+        raise ValueError("B2 changed an unrelated A5 reward")
+    if current["scales"].get("carry_upper_body_pose") != .5:
+        raise ValueError("B2 requires the existing upper-body posture prior")
+
+
 def validate_a5_contract(checkpoint, spec, teacher_hash, reference_hash, handoff, names, scale, dt, rewards=None):
     """Fail closed; an original locomotion checkpoint is never an A5 substitute."""
     contract = checkpoint.get("handoff_contract")
@@ -309,6 +383,15 @@ def validate_a5_contract(checkpoint, spec, teacher_hash, reference_hash, handoff
     for key, expected in (("dof_names", list(names)), ("action_scale", scale), ("dt", dt), ("actor_obs", 738)):
         if contract.get(key) != expected:
             raise ValueError("A5 action/observation contract mismatch: " + key)
-    if not contract.get("rewards") or (rewards is not None and contract["rewards"] != rewards):
+    def normalized_reward_contract(value):
+        import copy
+        result = copy.deepcopy(value)
+        # Newly introduced opt-in zero scales have no behavioral effect on A5.
+        for key in ("gait_foot_slip", "gait_swing_clearance", "gait_foot_scuff", "gait_air_time"):
+            if result.get("scales", {}).get(key) == 0:
+                result["scales"].pop(key)
+        return result
+    if not contract.get("rewards") or (rewards is not None and
+            normalized_reward_contract(contract["rewards"]) != normalized_reward_contract(rewards)):
         raise ValueError("A5 reward/posture contract unavailable or differs from evaluator")
     return contract

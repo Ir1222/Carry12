@@ -46,6 +46,8 @@ class Bucket:
             self.count[side + "_touchdowns"] += int(row[side + "_touchdown"])
             self.count[side + "_scuffs"] += int(row[side + "_scuff_onset"])
             self.count[side + "_near"] += int(row[side + "_near_ground_motion"])
+            self.count[side + "_noncontact_samples"] += not c
+            self.count[side + "_swing_scuff"] += not c and int(row[side + "_near_ground_motion"])
             self.count[side + "_slip_m"] += float(row[side + "_slip_step_m"])
             for source in SOURCES:
                 for mode in ("raw", "filtered"):
@@ -130,6 +132,8 @@ class Bucket:
                         touchdown_frequency_hz=self.count[side + "_touchdowns"] / (self.n * self.dt),
                         slip_distance_proxy_m=self.count[side + "_slip_m"],
                         near_ground_motion_ratio=self.count[side + "_near"] / self.n,
+                        noncontact_scuff_rate=(self.count[side + "_swing_scuff"] / self.count[side + "_noncontact_samples"]
+                                               if self.count[side + "_noncontact_samples"] else None),
                         possible_scuff_onsets=self.count[side + "_scuffs"],
                         legacy_combined_contact_disagreement_ratio=self.count[side + "_legacy_disagree"] / self.n)
             foot["pitch_roll_comparison"] = {mode: dict(
@@ -207,7 +211,8 @@ def analyze_gait(directory):
                    handoff_conditional_completion=success/eligible if eligible else None,
                    termination_counts=dict(Counter(str(e["reason"]) for e in episodes.values())),
                    terminal_condition_counts=dict(terminal_causes),
-                   settings=SETTINGS, limitations=manifest["gait_diagnostics"]["limitations"],
+                   settings=manifest["gait_diagnostics"].get("settings", SETTINGS),
+                   limitations=manifest["gait_diagnostics"]["limitations"],
                    primary_cohort="successful_carry; terminal rows excluded; inspect all_episodes for survivor bias",
                    bout_censoring="Only complete bouts within an episode and reporting window; boundary bouts omitted",
                    windows={cohort: {w: b.report() for w, b in windows.items()} for cohort, windows in buckets.items()})

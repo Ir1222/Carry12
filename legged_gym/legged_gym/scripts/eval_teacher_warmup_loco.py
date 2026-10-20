@@ -22,6 +22,10 @@ def parse_args():
     p.add_argument("--collect_teacher", action="store_true")
     p.add_argument("--gait_diagnostics", action="store_true",
                    help="Experiment 0: strict A5 vx=0.8 contact/clearance/limiter measurements")
+    p.add_argument("--gait_contact_source", choices=["combined", "roll"], default="combined",
+                   help="Use roll for BOTH A5 and B2 comparisons; combined preserves Experiment 0")
+    p.add_argument("--b2_reward_smoke", action="store_true",
+                   help="Evaluate original A5 weights with exactly the B2 reward delta enabled")
     own, remaining = p.parse_known_args()
     if own.gait_diagnostics:
         if own.collect_teacher or own.ablation != "A5" or not own.posture_reference:
@@ -31,6 +35,8 @@ def parse_args():
         if not own.handoff_config:
             own.handoff_config = str(Path(__file__).resolve().parents[3] /
                                     "experiments/teacher_warmup/config_gait_diagnostics_vx08.json")
+    if own.b2_reward_smoke and (not own.gait_diagnostics or own.gait_contact_source != "roll"):
+        raise ValueError("B2 reward smoke requires --gait_diagnostics --gait_contact_source roll")
     __import__("isaacgym")  # Must initialize before importing torch.
     # Match the existing entrypoints: envs must start registration before utils
     # imports task_registry, which itself imports a config from the envs package.
@@ -83,14 +89,19 @@ def main():
             raise ValueError("Evaluation joint order/action scaling differs from training")
     gait = None
     if own.gait_diagnostics:
-        from gait_diagnostics import GaitDiagnostics, validate_a5_contract, evaluation_handoff_overrides
+        from gait_diagnostics import (GaitDiagnostics, validate_a5_contract, evaluation_handoff_overrides,
+                                      validate_b2_reward_contract)
         from isaacgym import gymapi
         from legged_gym import LEGGED_GYM_ROOT_DIR
         validate_a5_contract(read_checkpoint(own.student_checkpoint), spec,
                              file_sha256(own.teacher_checkpoint), file_sha256(own.posture_reference),
                              class_to_dict(env.cfg.handoff), env.dof_names,
-                             env.cfg.control.action_scale, env.dt, class_to_dict(env.cfg.rewards))
-        gait = GaitDiagnostics(env, env.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR), gymapi)
+                             env.cfg.control.action_scale, env.dt,
+                             None if own.b2_reward_smoke else class_to_dict(env.cfg.rewards))
+        if own.b2_reward_smoke:
+            validate_b2_reward_contract(saved_contract["rewards"], class_to_dict(env.cfg.rewards))
+        gait = GaitDiagnostics(env, env.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR), gymapi,
+                               contact_source=own.gait_contact_source)
         env.gait_diagnostics = gait
     if own.collect_teacher:
         if env.cfg.handoff.command_suite != "fixed" or env.cfg.handoff.fixed_command != [0.4, 0, 0]:
@@ -106,7 +117,12 @@ def main():
                 "dt": env.dt, "actor_spec": spec,
                 "action_scale": env.cfg.control.action_scale,
                 "posture_reference": own.posture_reference or None,
-                "carry_seconds": own.carry_seconds}
+                "carry_seconds": own.carry_seconds,
+                "num_envs": env.num_envs,
+                "physical_reset_configuration": {key: class_to_dict(getattr(env.cfg, key)) for key in
+                    ("asset", "init_state", "domain_rand", "dataset", "terrain", "noise", "sim")}}
+    if own.b2_reward_smoke:
+        manifest["kind"] = "original_A5_weights_with_B2_reward_smoke"
     if gait is not None:
         overrides = evaluation_handoff_overrides(saved_contract["handoff"], class_to_dict(env.cfg.handoff))
         if overrides:
@@ -118,6 +134,8 @@ def main():
                         reference_sha256=file_sha256(own.posture_reference),
                         rewards=class_to_dict(env.cfg.rewards),
                         checkpoint_handoff=saved_contract["handoff"], evaluation_handoff_overrides=overrides)
+        if getattr(env, "gait_enabled", False):
+            manifest.update(gait_configuration=class_to_dict(env.cfg.gait), gait_geometry=env.gait_geometry)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     base_fields = ["episode", "env", "time_s", "student_valid", "phase", "control_phase", "handoff_relative_s",
                    "ready", "pickup", "eligible", "warmup_s", "reason", "done",
@@ -128,12 +146,17 @@ def main():
     joint_fields = [f"{kind}:{name}" for kind in ("q", "dq", "raw_action", "applied_action", "pd_target")
                     for name in env.dof_names]
     gait_fields = gait.fields([env.dof_names[j] for j in env.groups["legs"]]) if gait is not None else []
+    reward_fields = ([prefix + name for name in env.reward_names
+                      for prefix in ("reward_raw/", "reward_weighted/")]
+                     if getattr(env, "gait_enabled", False) else [])
+    clearance_fields = ([side + "_b2_clearance_error_m" for side in ("left", "right")]
+                        if gait is not None and getattr(env, "gait_enabled", False) else [])
     slots = list(range(env.num_envs))
     ages = [0.0] * env.num_envs
     next_episode = env.num_envs
     completed = 0
     with (out / "steps.csv").open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=base_fields + joint_fields + gait_fields)
+        writer = csv.DictWriter(stream, fieldnames=base_fields + joint_fields + gait_fields + reward_fields + clearance_fields)
         writer.writeheader()
         with torch.no_grad():
             obs, _ = env.reset()
@@ -178,6 +201,12 @@ def main():
                                     for j, name in enumerate(env.dof_names)})
                     if gait is not None:
                         row.update(gait.row(row, e, env))
+                    for key in reward_fields:
+                        row[key] = float(snap[key][e])
+                    for si, side in enumerate(("left", "right")):
+                        key = side + "_b2_clearance_error_m"
+                        if key in clearance_fields:
+                            row[key] = float(gait.b2_clearance[e, si]) - row[side + "_clearance_m"]
                     writer.writerow(row)
                     if bool(dones[e]):
                         completed += 1

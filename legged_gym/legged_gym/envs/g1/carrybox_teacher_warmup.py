@@ -79,6 +79,131 @@ class LeggedRobot(CarryLocomotion):
             self.pose_reference = reference
         if self.cfg.rewards.scales.carry_upper_body_pose and self.pose_reference is None:
             raise ValueError("Collect and validate a real teacher posture reference first")
+        self.gait_enabled = any(getattr(self.cfg.rewards.scales, name) != 0 for name in
+                                ("gait_foot_slip", "gait_swing_clearance", "gait_foot_scuff", "gait_air_time"))
+        if self.gait_enabled:
+            self._init_gait_buffers()
+
+    def _init_gait_buffers(self):
+        from isaacgym import gymapi
+        from legged_gym import LEGGED_GYM_ROOT_DIR
+        from legged_gym.scripts.gait_diagnostics import build_gait_geometry
+        if self.cfg.terrain.mesh_type != "plane":
+            raise ValueError("B2 calibrated clearance requires plane terrain")
+        g = self.cfg.gait
+        for key in ("contact_threshold_N", "moving_threshold", "horizontal_speed_scale_m_s",
+                    "target_height_m", "scuff_height_m", "air_time_range_s",
+                    "geometry_fit_tolerance_m", "geometry_validation_tolerance_m"):
+            if not math.isfinite(getattr(g, key)) or getattr(g, key) <= 0:
+                raise ValueError("Invalid gait parameter: " + key)
+        if (not isinstance(g.geometry_max_points, int) or not 4 <= g.geometry_max_points <= 256
+                or not math.isfinite(g.slip_tolerance_m_s) or g.slip_tolerance_m_s < 0
+                or not math.isfinite(g.air_time_min_s) or g.air_time_min_s < 0):
+            raise ValueError("Invalid gait geometry/tolerance settings")
+        names = self.gym.get_actor_rigid_body_names(self.envs[0], self.actor_handles[0])
+        foot_names = ("left_ankle_roll_link", "right_ankle_roll_link")
+        indices = []
+        for name in foot_names:
+            if name not in names:
+                raise ValueError("Missing gait body: " + name)
+            resolved = [self.gym.get_actor_rigid_body_index(e, a, names.index(name), gymapi.DOMAIN_ENV)
+                        for e, a in zip(self.envs, self.actor_handles)]
+            if len(set(resolved)) != 1 or not 0 <= resolved[0] < self.contact_forces.shape[1]:
+                raise ValueError("Invalid environment-domain gait body: " + name)
+            indices.append(resolved[0])
+        if indices[0] == indices[1]:
+            raise ValueError("Gait bodies must be distinct")
+        self.gait_feet_indices = torch.tensor(indices, device=self.device, dtype=torch.long)
+        urdf = self.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
+        self.gait_geometry = build_gait_geometry(urdf, g.geometry_max_points,
+                                                g.geometry_fit_tolerance_m, g.geometry_validation_tolerance_m)
+        bodies = self.gait_geometry["bodies"]
+        count = max(bodies[name]["point_count"] for name in foot_names)
+        # Pad using an existing point: duplicated vertices do not change min Z.
+        points = [bodies[name]["points"] + [bodies[name]["points"][0]] * (count - bodies[name]["point_count"])
+                  for name in foot_names]
+        self.gait_sole_points = self.dof_pos.new_tensor(points)
+        self.gait_geometry["body_indices_domain_env"] = dict(zip(foot_names, indices))
+        print("[B2 geometry] " + json.dumps({name: bodies[name]["error"] for name in foot_names}, sort_keys=True))
+        self.gait_contact_raw = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self.device)
+        self.gait_previous_raw = self.gait_contact_raw.clone()
+        self.gait_contact_filtered = self.gait_contact_raw.clone()
+        self.gait_touchdown = self.gait_contact_raw.clone()
+        self.gait_swing = self.gait_contact_raw.clone()
+        self.gait_stance_seen = self.gait_contact_raw.clone()
+        self.gait_air_time = self.dof_pos.new_zeros(self.num_envs, 2)
+        self.gait_preceding_air_time = self.gait_air_time.clone()
+        self.gait_horizontal_velocity = self.dof_pos.new_zeros(self.num_envs, 2, 2)
+        self.gait_horizontal_speed = self.gait_air_time.clone()
+        self.gait_clearance = self.gait_air_time.clone()
+        self.gait_previous_owner = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.gait_history_valid = self.gait_previous_owner.clone()
+        self.gait_reward_diagnostics = {}
+
+    def _reset_gait_history(self, ids):
+        for name in ("contact_raw", "previous_raw", "contact_filtered", "touchdown", "swing", "stance_seen",
+                     "air_time", "preceding_air_time", "horizontal_velocity", "horizontal_speed", "clearance",
+                     "previous_owner", "history_valid"):
+            getattr(self, "gait_" + name)[ids] = 0
+
+    def _gait_moving(self):
+        command = self.control_command  # command that produced this physics step
+        limit = self.cfg.gait.moving_threshold
+        return self.control_mask & ((command[:, :2].norm(dim=-1) > limit) | (command[:, 2].abs() > limit))
+
+    def _update_gait_state(self):
+        # Exactly once per physics/reward step, before auto-reset, using PRE-step ownership.
+        changed = ~self.gait_history_valid | (self.gait_previous_owner != self.control_mask)
+        self._reset_gait_history(changed)
+        history = ~changed
+        body = self.rigid_body_states[:, self.gait_feet_indices]
+        raw = self.contact_forces[:, self.gait_feet_indices].norm(dim=-1) > self.cfg.gait.contact_threshold_N
+        filtered = raw | self.gait_previous_raw
+        moving = self._gait_moving()
+        self.gait_touchdown.copy_(filtered & ~self.gait_contact_filtered & history[:, None]
+                                 & self.gait_stance_seen & (self.gait_air_time > 0))
+        self.gait_preceding_air_time.copy_(self.gait_air_time)
+        self.gait_contact_raw.copy_(raw)
+        self.gait_contact_filtered.copy_(filtered)
+        self.gait_previous_raw.copy_(raw)
+        self.gait_swing.copy_(~filtered)
+        # No reward for an airborne episode/owner boundary or time accrued standing.
+        self.gait_stance_seen &= moving[:, None]
+        self.gait_stance_seen |= filtered & moving[:, None]
+        self.gait_air_time.copy_(torch.where(~filtered & moving[:, None], self.gait_air_time + self.dt, 0.0))
+        self.gait_horizontal_velocity.copy_(body[:, :, 7:9])
+        self.gait_horizontal_speed.copy_(self.gait_horizontal_velocity.norm(dim=-1))
+        points = self.gait_sole_points[None].expand(self.num_envs, -1, -1, -1)
+        q = F.normalize(body[:, :, None, 3:7], dim=-1)
+        xyz = q[..., :3].expand_as(points)
+        t = 2 * torch.cross(xyz, points, dim=-1)
+        rotated = points + q[..., 3:4] * t + torch.cross(xyz, t, dim=-1)
+        # The existing simulator plane is global world Z=0, not env-origin Z.
+        self.gait_clearance.copy_(body[:, :, 2] + rotated[..., 2].amin(dim=-1))
+        self.gait_previous_owner.copy_(self.control_mask)
+        self.gait_history_valid[:] = True
+
+    def _reward_gait_foot_slip(self):
+        g = self.cfg.gait
+        slip = ((self.gait_horizontal_speed - g.slip_tolerance_m_s) / g.horizontal_speed_scale_m_s).clamp(0, 1)
+        return (slip * self.gait_contact_filtered).mean(-1) * self._gait_moving()
+
+    def _reward_gait_swing_clearance(self):
+        g = self.cfg.gait
+        gate = ((self.gait_horizontal_speed - g.slip_tolerance_m_s) / g.horizontal_speed_scale_m_s).clamp(0, 1)
+        score = (self.gait_clearance / g.target_height_m).clamp(0, 1)
+        return (self.gait_swing * gate * score).mean(-1) * self._gait_moving()
+
+    def _reward_gait_foot_scuff(self):
+        g = self.cfg.gait
+        speed = (self.gait_horizontal_speed / g.horizontal_speed_scale_m_s).clamp(0, 1)
+        score = torch.exp(-self.gait_clearance.clamp_min(0) / g.scuff_height_m)
+        return (self.gait_swing * speed * score).mean(-1) * self._gait_moving()
+
+    def _reward_gait_air_time(self):
+        g = self.cfg.gait
+        score = ((self.gait_preceding_air_time - g.air_time_min_s) / g.air_time_range_s).clamp(0, 1)
+        return (score * self.gait_touchdown).sum(-1).clamp_max(1) * self._gait_moving()
 
     # Explicitly bypass reference-based locomotion reset and forced carry gates.
     _reset_actors = FullCarryBox._reset_actors
@@ -120,6 +245,8 @@ class LeggedRobot(CarryLocomotion):
         self.failure_reason[env_ids] = 0
         self.obs_buf[env_ids] = 0
         self.actions[env_ids] = 0
+        if getattr(self, "gait_enabled", False):
+            self._reset_gait_history(env_ids)
 
     def reset(self):
         # Match Full BaseTask's initial zero-action physics step. Teacher must
@@ -239,11 +366,25 @@ class LeggedRobot(CarryLocomotion):
             lambda function=function: function() * self.control_mask
             for function in self.reward_functions
         ]
+        if getattr(self, "gait_enabled", False):
+            self.reward_functions = [self._gait_logged_reward(name, function)
+                                     for name, function in zip(self.reward_names, self.reward_functions)]
+
+    def _gait_logged_reward(self, name, function):
+        def measured():
+            value = function()
+            self.gait_reward_diagnostics["reward_raw/" + name] = value.detach()
+            # reward_scales already includes dt, exactly as in the parent sum.
+            self.gait_reward_diagnostics["reward_weighted/" + name] = value.detach() * self.reward_scales[name]
+            return value
+        return measured
 
     def _reward_termination(self):
         return FullCarryBox._reward_termination(self) * self.control_mask
 
     def compute_reward(self):
+        if getattr(self, "gait_enabled", False):
+            self._update_gait_state()
         super().compute_reward()
         self.rew_buf *= self.control_mask  # pre-step ownership, not post-step phase
         ready, metrics = self.readiness()
@@ -252,6 +393,8 @@ class LeggedRobot(CarryLocomotion):
             pose_error = pose_excess(self.dof_pos[:, self.pose_ids], self.pose_lower,
                                       self.pose_upper, self.pose_softness).square().mean(-1).sqrt()
         self.step_diagnostics = dict(metrics)
+        if getattr(self, "gait_enabled", False):
+            self.step_diagnostics.update(self.gait_reward_diagnostics)
         if self.pose_reference is not None:
             self.step_diagnostics["posture_error"] = pose_error
         self.last_step_snapshot = {
