@@ -12,7 +12,7 @@ class G1Cfg(WarmupCfg):
         warmup_vx = 0.8
         fixed_command = [0.8, 0.0, 0.0]
         command_suite = "mixed"
-        mixed_command_hold_s = 2.0
+        mixed_command_hold_s = 0.3
         mixed_command_slew_rates = [0.6, 0.5, 0.6]
         mixed_command_manager = "hold_then_slew_v1"
 

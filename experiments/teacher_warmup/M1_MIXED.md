@@ -15,8 +15,17 @@ termination supervisor, teacher pipeline, A5 action adapter and masked PPO.
 Teacher: real approach/pickup with `[0.8,0,0]`. On supervisor eligibility the next
 (first student-owned) action sees `[0.8,0,0]`, and target and applied command are
 both initialized to that value. Only completed student-owned physics steps accrue
-the hold timer, including HANDOFF_TRANSITION. Release requires STUDENT_CARRY and
-at least `mixed_command_hold_s` (default 2.0s). A longer transition delays release.
+the hold timer, including HANDOFF_TRANSITION. Release is allowed during either
+HANDOFF_TRANSITION or STUDENT_CARRY after `mixed_command_hold_s` (default 0.3s).
+The first Student action still observes `[0.8,0,0]`; after 0.3s, the existing
+slew limiter moves the applied command toward the sampled target. Successful
+HANDOFF_TRANSITION -> STUDENT_CARRY preserves the target, applied command,
+resampling timer and ramp. Fixed evaluation overrides use the same release rule.
+
+The saved handoff contract includes `mixed_command_hold_s`. Existing M1
+checkpoints with a 2.0s hold cannot resume with this 0.3s configuration; both
+pre-simulator validation and the runner's strict resume contract reject them.
+B2 Actor/std initialization remains supported without changing its validation.
 
 After release, targets follow the inherited 10/10/10/10/60 stand/vx/vy/yaw/mixed
 sampler and original dead zones, with vx `[-0.6,1.2]`, vy `[-0.5,0.5]` and yaw
@@ -224,7 +233,14 @@ CPU suite:
 python -m pytest "$Repo/experiments/teacher_warmup/tests" -q --basetemp "$Repo/.pytest_cache/mixed_loco_validation"
 ```
 
-Final result (2026-10-21): **102 passed in 27.95s**, including all 61 existing
+0.3s hold/release regression (2026-10-21): **133 passed in 27.74s**.
+This includes the original A/B2 cases, release during both Student-controlled
+phases, first-command/hold/slew timing, uninterrupted command state across the
+phase transition, and rejection of legacy 2s checkpoints by both resume checks.
+No physical simulation, production training, or existing-result modification
+was performed for this change.
+
+Earlier production-settings validation (2026-10-21): **102 passed in 27.95s**, including all 61 existing
 regression tests and 41 M1 cases. Both entrypoints' `--help`, syntax
 compilation and `git diff --check` passed. Git comparison confirmed the original
 A5/B2 JSONs, Warmup environment/config, masked PPO/storage and legacy verification
@@ -251,8 +267,9 @@ checkpoint was available locally to audit beyond synthetic checkpoint fixtures.
 On an Isaac Gym/CUDA host, a minimal physical smoke uses the evaluation command
 with `--episodes 2 --num_envs 2 --carry_seconds 30` and a new output directory.
 Inspect the trace for actual pickup/eligibility, first Student command at 0.8,
-100 Student-controlled held steps at dt=0.02, successful transition before
-release, and bounded command changes after release. Then run all suites on B2
+15 Student-controlled held steps at dt=0.02, release at 0.3s even during
+HANDOFF_TRANSITION, bounded command changes, and continuity on transition to
+STUDENT_CARRY. Then run all suites on B2
 and selected M1 checkpoints with identical seeds/settings and compare manifests.
 No automatic curriculum/reward adjustment is triggered by results.
 

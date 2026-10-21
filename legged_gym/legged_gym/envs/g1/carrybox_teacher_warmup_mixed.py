@@ -2,7 +2,7 @@
 import math
 import torch
 
-from rsl_rl.teacher_handoff import TEACHER_WARMUP, STUDENT_CARRY
+from rsl_rl.teacher_handoff import TEACHER_WARMUP, HANDOFF_TRANSITION, STUDENT_CARRY
 from .carrybox import LeggedRobot as FullCarryBox
 from .carrybox_teacher_warmup import LeggedRobot as Warmup
 
@@ -22,7 +22,7 @@ class LeggedRobot(Warmup):
         self.target_command = self.commands.new_zeros(self.num_envs, 3)
         self.applied_command = torch.zeros_like(self.target_command)
         self.student_control_elapsed = self.commands.new_zeros(self.num_envs)
-        # Integer ticks prevent a 2.0s hold drifting by one step in float32.
+        # Integer ticks prevent the configured hold drifting by one step in float32.
         self.student_control_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.mixed_released = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.mixed_ramp_active = self.mixed_released.clone()
@@ -85,7 +85,7 @@ class LeggedRobot(Warmup):
         student = self.phase != TEACHER_WARMUP
         released_before = self.mixed_released.clone()
         if self.cfg.handoff.command_suite == "mixed":
-            release = (self.phase == STUDENT_CARRY) & ~released_before
+            release = ((self.phase == HANDOFF_TRANSITION) | (self.phase == STUDENT_CARRY)) & ~released_before
             release &= self.student_control_elapsed + 1e-7 >= self.cfg.handoff.mixed_command_hold_s
             self.mixed_released |= release
             # Timers run from target sampling, irrespective of ramp completion.
@@ -94,7 +94,7 @@ class LeggedRobot(Warmup):
             self._sample_mixed_targets(due.nonzero().flatten())
         elif self.cfg.handoff.command_suite == "fixed":
             # Explicit evaluation override; retain the same initial hold and adapter.
-            release = (self.phase == STUDENT_CARRY) & ~released_before
+            release = ((self.phase == HANDOFF_TRANSITION) | (self.phase == STUDENT_CARRY)) & ~released_before
             release &= self.student_control_elapsed + 1e-7 >= self.cfg.handoff.mixed_command_hold_s
             self.mixed_released |= release
             self.target_command[release] = self.commands.new_tensor(self.cfg.handoff.fixed_command)

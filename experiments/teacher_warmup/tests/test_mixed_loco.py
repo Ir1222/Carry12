@@ -41,7 +41,7 @@ def env():
     # Reuse actual inherited sampler with deterministic CPU Torch RNG.
     warmup._sample_carry_commands.__globals__["torch_rand_float"] = lambda lo, hi, shape, device: lo + (hi-lo) * torch.rand(shape, device=device)
     ns = dict(Warmup=warmup, FullCarryBox=warmup._reset_task.__globals__["FullCarryBox"],
-              torch=torch, math=math, TEACHER_WARMUP=0, STUDENT_CARRY=2)
+              torch=torch, math=math, TEACHER_WARMUP=0, HANDOFF_TRANSITION=1, STUDENT_CARRY=2)
     definitions("legged_gym/legged_gym/envs/g1/carrybox_teacher_warmup_mixed.py", ns)
     result = ns["LeggedRobot"].__new__(ns["LeggedRobot"])
     result.__dict__.update(vars(supervisor_fixture()))
@@ -78,7 +78,7 @@ def test_legacy_configs_unchanged_and_m1_exact():
             if key != "command_suite":
                 assert getattr(target, key) == value
     assert cfg.handoff.command_suite == "mixed"
-    assert cfg.handoff.mixed_command_hold_s == 2.
+    assert cfg.handoff.mixed_command_hold_s == .3
     assert cfg.handoff.mixed_command_slew_rates == [.6, .5, .6]
     assert cfg.env.num_envs == 4096
     assert ppo.runner.max_iterations == 10000
@@ -96,23 +96,32 @@ def test_first_student_hold_transition_and_single_release(env):
     env.phase[0] = 1
     env._set_student_commands(torch.tensor([0]))
     assert env.applied_command[0].tolist() == pytest.approx([.8, 0., 0.])
-    for _ in range(150):
+    assert torch.equal(env.target_command[0], env.applied_command[0])
+    assert torch.equal(env.carry_policy_commands[0, :3], env.applied_command[0])
+    assert env.student_control_elapsed[0] == 0
+    for _ in range(14):
         tick(env)
         assert env.applied_command[0].tolist() == pytest.approx([.8, 0., 0.])
-    assert env.student_control_elapsed[0] == 3.
-    assert not env.mixed_released.any()  # Even a transition longer than hold cannot release.
-    env.phase[0] = 2
-    env._advance_mixed_commands()
+        assert not env.mixed_released.any()
+        assert env.mixed_target_samples.eq(0).all()
+    assert env.student_control_elapsed[0] == pytest.approx(.28)
+    tick(env)
+    assert env.phase[0] == 1  # Release at 0.3s while still in HANDOFF_TRANSITION.
+    assert env.student_control_elapsed[0] == pytest.approx(.3)
     assert env.mixed_target_samples.tolist() == [1, 0, 0]
+    env.phase[0] = 2
     for _ in range(40):
         tick(env)
     assert env.mixed_target_samples.tolist() == [1, 0, 0]
 
 
-def test_hold_exact_ticks_and_axis_slew_independent(env):
-    env.phase[0] = 2
+@pytest.mark.parametrize("phase", [1, 2])
+@pytest.mark.parametrize("dt", [.02, float(torch.tensor(.005)) * 4])
+def test_hold_exact_ticks_and_axis_slew_independent(env, phase, dt):
+    env.dt = dt
+    env.phase[0] = phase
     env._set_student_commands(torch.tensor([0]))
-    for _ in range(99):
+    for _ in range(14):
         tick(env)
         assert env.applied_command[0].tolist() == pytest.approx([.8, 0., 0.])
         assert not env.mixed_released.any()
@@ -130,9 +139,9 @@ def test_hold_exact_ticks_and_axis_slew_independent(env):
 
 def test_target_timer_starts_at_sampling_not_settling_and_async(env):
     torch.manual_seed(13)
-    env.phase[:] = torch.tensor([2, 1, 0])
-    env.student_control_steps[0] = 100
-    env.student_control_elapsed[0] = 2.
+    env.phase[:] = torch.tensor([2, 0, 0])
+    env.student_control_steps[0] = 15
+    env.student_control_elapsed[0] = .3
     env._advance_mixed_commands()
     interval = float(env.carry_command_resample_time[0])
     assert 4 <= interval <= 6
@@ -146,14 +155,18 @@ def test_target_timer_starts_at_sampling_not_settling_and_async(env):
     assert env.mixed_ramp_active[0]
     tick(env)
     assert env.mixed_target_samples.tolist() == [2, 0, 0]
-    env.phase[1] = 2
+    env.phase[1] = 1
+    env._set_student_commands(torch.tensor([1]))
+    for _ in range(14):
+        tick(env)
+        assert env.mixed_target_samples.tolist() == [2, 0, 0]
     tick(env)
     assert env.mixed_target_samples.tolist() == [2, 1, 0]
 
 
 def test_reset_clears_every_manager_field_for_only_requested_environment(env):
     env.phase[:] = 2
-    env.student_control_elapsed[:] = 2
+    env.student_control_elapsed[:] = .3
     env._advance_mixed_commands()
     before = env.target_command[1:].clone()
     env._reset_mixed_commands(torch.tensor([0]))
@@ -201,7 +214,7 @@ def test_reward_observation_snapshot_temporal_consistency(env, monkeypatch):
     monkeypatch.setattr(warmup, "compute_reward", reward)
     monkeypatch.setattr(warmup, "compute_observations", observation)
     env.phase[:] = 2
-    env.student_control_elapsed[:] = 2
+    env.student_control_elapsed[:] = .3
     env._advance_mixed_commands()
     env.control_mask[:] = True
     env.carry_history_valid = torch.ones(3, dtype=torch.bool)
@@ -325,7 +338,7 @@ def test_m1_resume_contract_rejects_b2_and_manager_changes(tmp_path):
     # A valid early M1 save may have skipped all PPO updates while teacher warms up.
     early = dict(payload, iter=1, optimizer_state_dict={"state": {}}, timesteps=100)
     module.validate_m1_contract(early, spec, expected, resume=True)
-    payload["handoff_contract"]["handoff"]["mixed_command_hold_s"] = 1.
+    payload["handoff_contract"]["handoff"]["mixed_command_hold_s"] = 2.  # Legacy M1 contract.
     with pytest.raises(ValueError, match="handoff"):
         module.validate_m1_contract(payload, spec, expected, resume=True)
 
@@ -372,7 +385,8 @@ def test_absent_modes_missing_gait_and_ramp_metrics():
     ("vx_forward", [.8, 0., 0.], 1), ("vx_backward", [-.4, 0., 0.], 1),
     ("vy_left", [0., .3, 0.], 2), ("vy_right", [0., -.3, 0.], 2),
     ("yaw_left", [0., 0., .4], 3), ("yaw_right", [0., 0., -.4], 3)])
-def test_fixed_evaluation_suites_preserve_handoff_and_mode(env, suite, command, mode):
+@pytest.mark.parametrize("phase", [1, 2])
+def test_fixed_evaluation_suites_preserve_handoff_and_mode(env, suite, command, mode, phase):
     cfg, ppo = configs()
     saved = dict(handoff=as_dict(cfg.handoff), task="carrybox_teacher_warmup_mixed")
     saved["handoff"].pop("teacher_checkpoint")
@@ -383,8 +397,9 @@ def test_fixed_evaluation_suites_preserve_handoff_and_mode(env, suite, command, 
     assert cfg.handoff.fixed_command == command
     assert cfg.handoff.adapter == "rate_limited"
     env.cfg = cfg
-    env.phase[0] = 2
-    for _ in range(99):
+    env.phase[0] = phase
+    env._set_student_commands(torch.tensor([0]))
+    for _ in range(14):
         tick(env)
     assert env.applied_command[0].tolist() == pytest.approx([.8, 0., 0.])
     tick(env)
@@ -434,7 +449,7 @@ def test_real_runner_m1_snapshot_metrics_and_resume(tmp_path):
     train = as_dict(ppo)
     train["runner"].update(num_steps_per_env=8, save_interval=1)
     train["algorithm"].update(min_valid_samples=2, num_learning_epochs=1, num_mini_batches=2)
-    train.update(handoff_contract={"mixed_command_hold_s": 2.}, task="carrybox_teacher_warmup_mixed",
+    train.update(handoff_contract={"mixed_command_hold_s": cfg.handoff.mixed_command_hold_s}, task="carrybox_teacher_warmup_mixed",
                  initialization_provenance={"source_kind": "synthetic_test_B2"})
     synthetic = SyntheticVecEnv(path)
     step = synthetic.step
@@ -462,9 +477,13 @@ def test_real_runner_m1_snapshot_metrics_and_resume(tmp_path):
     resumed = TeacherWarmupOnPolicyRunner(SyntheticVecEnv(path), train, str(saved), str(tmp_path / "resume"), "cpu")
     resumed.load(str(saved))
     assert resumed.current_learning_iteration == 1 and resumed.alg.optimizer.state
-    resumed.contract["handoff"]["mixed_command_hold_s"] = 1.
+    assert resumed.contract["handoff"]["mixed_command_hold_s"] == .3
+    legacy = copy.deepcopy(data)
+    legacy["handoff_contract"]["handoff"]["mixed_command_hold_s"] = 2.
+    legacy_path = tmp_path / "legacy_hold_2s.pt"
+    torch.save(legacy, legacy_path)
     with pytest.raises(ValueError, match="Resume contract"):
-        resumed.load(str(saved))
+        resumed.load(str(legacy_path))
     resumed.writer.close()
 
 
@@ -510,6 +529,44 @@ def test_inherited_supervisor_starts_first_student_at_08_and_holds(env):
         env.check_termination()
         env._advance_mixed_commands()
     assert first_student_step is not None
-    assert len(commands) >= 101
-    assert torch.stack(commands[:100]).eq(torch.tensor([.8, 0., 0.])).all()
+    assert len(commands) >= 16
+    assert torch.stack(commands[:15]).eq(torch.tensor([.8, 0., 0.])).all()
     assert env.mixed_target_samples.eq(1).all()
+
+
+
+@pytest.mark.parametrize("suite", ["mixed", "fixed"])
+def test_transition_to_student_carry_preserves_command_state(env, suite):
+    # Prescribed physical state exercises the actual inherited handoff supervisor.
+    env.cfg.handoff.command_suite = suite
+    target = [-.6, .5, -.7]
+    env.cfg.handoff.fixed_command = target
+    def sample(ids):
+        env.commands[ids] = 0
+        env.commands[ids, :3] = env.commands.new_tensor(target)
+        env.carry_command_mode[ids] = 4
+    env._sample_carry_commands = sample
+    env.phase[0] = 1
+    env.contact_forces[1:] = 0  # Other envs stay teacher-owned independently.
+    env._set_student_commands(torch.tensor([0]))
+    assert torch.equal(env.applied_command[0], env.commands.new_tensor([.8, 0., 0.]))
+    for _ in range(20):
+        tick(env)
+    assert env.phase[0] == 1 and env.mixed_released[0] and env.mixed_ramp_active[0]
+    assert env.mixed_target_samples.tolist() == [1, 0, 0]
+    fields = ("target_command", "applied_command", "carry_command_resample_time", "mixed_ramp_active",
+              "mixed_released", "mixed_target_samples", "carry_command_mode", "student_control_elapsed")
+    before = {name: getattr(env, name).clone() for name in fields}
+    env.phase_age[0] = env.cfg.handoff.transition_duration_s
+    env.check_termination()
+    assert env.phase[0] == 2 and not env.reset_buf[0]
+    for name in fields:
+        assert torch.equal(getattr(env, name), before[name]), name
+    tick(env)
+    assert torch.equal(env.target_command, before["target_command"])
+    assert torch.equal(env.mixed_target_samples, before["mixed_target_samples"])
+    limit = env.commands.new_tensor(env.cfg.handoff.mixed_command_slew_rates) * env.dt
+    assert ((env.applied_command - before["applied_command"]).abs() <= limit + 1e-7).all()
+    assert env.mixed_ramp_active[0]
+    expected_timer = before["carry_command_resample_time"][0] - (env.dt if suite == "mixed" else 0)
+    assert env.carry_command_resample_time[0] == pytest.approx(float(expected_timer))
