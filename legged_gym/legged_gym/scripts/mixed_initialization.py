@@ -2,7 +2,7 @@
 import math
 from pathlib import Path
 
-from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint
+from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint, matching_control_dt
 
 MIXED_TASK = "carrybox_teacher_warmup_mixed"
 MANAGER_KEYS = ("mixed_command_hold_s", "mixed_command_slew_rates", "mixed_command_manager")
@@ -29,7 +29,12 @@ def validate_m1_contract(checkpoint, spec, expected, resume=False):
         raise ValueError("Invalid action std")
     for key in ("teacher_sha256", "reference_sha256", "dof_names", "actor_obs", "critic_obs",
                 "dt", "action_scale", "rewards", "algorithm", "policy"):
-        if c.get(key) != expected[key]:
+        actual, wanted = c.get(key), expected[key]
+        if key == "dt":
+            if not matching_control_dt(actual, wanted):
+                raise ValueError("M1 checkpoint contract mismatch: dt (checkpoint=" + repr(actual)
+                                 + ", requested=" + repr(wanted) + ", tolerance=1e-9 s)")
+        elif actual != wanted:
             raise ValueError("M1 checkpoint contract mismatch: " + key)
     handoff = dict(expected["handoff"])
     if resume:
@@ -56,7 +61,10 @@ def validate_m1_contract(checkpoint, spec, expected, resume=False):
         saved = environment.get(key)
         wanted = current[key]
         if key == "domain_rand" and saved and "push_interval" in saved:
-            wanted = dict(wanted, push_interval=math.ceil(wanted["push_interval_s"] / expected["dt"]))
+            # Saved configs contain ceil(push_interval_s / runtime control dt).
+            # After the <=1 ns check above, use that exact serialized dt here:
+            # float32 can move an integer quotient just above the ceil boundary.
+            wanted = dict(wanted, push_interval=math.ceil(wanted["push_interval_s"] / c["dt"]))
         if saved != wanted:
             raise ValueError("M1 checkpoint environment mismatch: " + key)
     if not environment.get("gait_geometry"):
@@ -77,7 +85,7 @@ def validate_m1_training_settings(env_cfg, train_cfg, num_envs=None):
 
 def validate_m1_runtime(env, train_cfg):
     validate_m1_training_settings(env.cfg, train_cfg, env.num_envs)
-    if (not math.isclose(env.dt, .02, rel_tol=0., abs_tol=1e-9) or env.num_obs != 738
+    if (not matching_control_dt(env.dt, .02) or env.num_obs != 738
             or env.num_actions != 29 or env.num_privileged_obs != 160):
         raise ValueError("M1 runtime observation/action/control contract mismatch")
 
@@ -121,6 +129,7 @@ def validate_m1_initialization(env_cfg, train_cfg, own, args):
         if scales[key] != value:
             raise ValueError("M1 requires B2 gait scales: " + key)
     return dict(source_checkpoint=str(Path(path).resolve()), source_sha256=file_sha256(path),
+                source_control_dt=contract["dt"], requested_control_dt=expected["dt"],
                 source_iteration=checkpoint["iter"], source_kind="M1_resume" if args.resume else "trained_B2",
                 teacher_sha256=teacher_hash, reference_sha256=reference_hash,
                 source_gait_geometry=contract["environment"]["gait_geometry"],

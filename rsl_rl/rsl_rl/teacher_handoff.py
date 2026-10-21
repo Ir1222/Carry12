@@ -1,11 +1,20 @@
 """Simulator-independent checkpoint and control contracts for teacher handoff."""
 import hashlib
+import math
 import re
 
 import torch
 from torch import nn
 
 TEACHER_WARMUP, HANDOFF_TRANSITION, STUDENT_CARRY = range(3)
+
+
+def matching_control_dt(actual, expected):
+    """Allow <=1 ns of SimParams float32 representation error, not a changed timestep."""
+    return (isinstance(actual, (int, float)) and not isinstance(actual, bool)
+            and isinstance(expected, (int, float)) and not isinstance(expected, bool)
+            and math.isfinite(actual) and math.isfinite(expected) and actual > 0 and expected > 0
+            and math.isclose(actual, expected, rel_tol=0., abs_tol=1e-9))
 
 
 def read_checkpoint(path):

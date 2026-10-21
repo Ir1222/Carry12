@@ -99,7 +99,7 @@ def main():
     import torch
     from legged_gym.envs import task_registry
     from legged_gym.utils.helpers import class_to_dict
-    from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint
+    from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint, matching_control_dt
     mixed_task = args.task == "carrybox_teacher_warmup_mixed"
     if args.task not in ("carrybox_teacher_warmup", "carrybox_teacher_warmup_mixed"):
         raise ValueError("Use a teacher warmup task")
@@ -134,7 +134,7 @@ def main():
     if mixed_task:
         if (saved_contract.get("rewards") != class_to_dict(env.cfg.rewards)
                 or saved_contract.get("environment", {}).get("gait") != class_to_dict(env.cfg.gait)
-                or saved_contract.get("dt") != env.dt
+                or not matching_control_dt(saved_contract.get("dt"), env.dt)
                 or saved_contract.get("environment", {}).get("gait_geometry") != env.gait_geometry):
             raise ValueError("M1/B2 evaluation reward, gait geometry or timestep mismatch")
     gait = None

@@ -1,0 +1,250 @@
+diff --git a/legged_gym/legged_gym/scripts/eval_teacher_warmup_loco.py b/legged_gym/legged_gym/scripts/eval_teacher_warmup_loco.py
+index 8413dff..53356f2 100644
+--- a/legged_gym/legged_gym/scripts/eval_teacher_warmup_loco.py
++++ b/legged_gym/legged_gym/scripts/eval_teacher_warmup_loco.py
+@@ -99,7 +99,7 @@ def main():
+     import torch
+     from legged_gym.envs import task_registry
+     from legged_gym.utils.helpers import class_to_dict
+-    from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint
++    from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint, matching_control_dt
+     mixed_task = args.task == "carrybox_teacher_warmup_mixed"
+     if args.task not in ("carrybox_teacher_warmup", "carrybox_teacher_warmup_mixed"):
+         raise ValueError("Use a teacher warmup task")
+@@ -134,7 +134,7 @@ def main():
+     if mixed_task:
+         if (saved_contract.get("rewards") != class_to_dict(env.cfg.rewards)
+                 or saved_contract.get("environment", {}).get("gait") != class_to_dict(env.cfg.gait)
+-                or saved_contract.get("dt") != env.dt
++                or not matching_control_dt(saved_contract.get("dt"), env.dt)
+                 or saved_contract.get("environment", {}).get("gait_geometry") != env.gait_geometry):
+             raise ValueError("M1/B2 evaluation reward, gait geometry or timestep mismatch")
+     gait = None
+diff --git a/legged_gym/legged_gym/scripts/mixed_initialization.py b/legged_gym/legged_gym/scripts/mixed_initialization.py
+index 12aff2f..4a2c51f 100644
+--- a/legged_gym/legged_gym/scripts/mixed_initialization.py
++++ b/legged_gym/legged_gym/scripts/mixed_initialization.py
+@@ -2,7 +2,7 @@
+ import math
+ from pathlib import Path
+ 
+-from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint
++from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint, matching_control_dt
+ 
+ MIXED_TASK = "carrybox_teacher_warmup_mixed"
+ MANAGER_KEYS = ("mixed_command_hold_s", "mixed_command_slew_rates", "mixed_command_manager")
+@@ -29,7 +29,12 @@ def validate_m1_contract(checkpoint, spec, expected, resume=False):
+         raise ValueError("Invalid action std")
+     for key in ("teacher_sha256", "reference_sha256", "dof_names", "actor_obs", "critic_obs",
+                 "dt", "action_scale", "rewards", "algorithm", "policy"):
+-        if c.get(key) != expected[key]:
++        actual, wanted = c.get(key), expected[key]
++        if key == "dt":
++            if not matching_control_dt(actual, wanted):
++                raise ValueError("M1 checkpoint contract mismatch: dt (checkpoint=" + repr(actual)
++                                 + ", requested=" + repr(wanted) + ", tolerance=1e-9 s)")
++        elif actual != wanted:
+             raise ValueError("M1 checkpoint contract mismatch: " + key)
+     handoff = dict(expected["handoff"])
+     if resume:
+@@ -56,7 +61,10 @@ def validate_m1_contract(checkpoint, spec, expected, resume=False):
+         saved = environment.get(key)
+         wanted = current[key]
+         if key == "domain_rand" and saved and "push_interval" in saved:
+-            wanted = dict(wanted, push_interval=math.ceil(wanted["push_interval_s"] / expected["dt"]))
++            # Saved configs contain ceil(push_interval_s / runtime control dt).
++            # After the <=1 ns check above, use that exact serialized dt here:
++            # float32 can move an integer quotient just above the ceil boundary.
++            wanted = dict(wanted, push_interval=math.ceil(wanted["push_interval_s"] / c["dt"]))
+         if saved != wanted:
+             raise ValueError("M1 checkpoint environment mismatch: " + key)
+     if not environment.get("gait_geometry"):
+@@ -77,7 +85,7 @@ def validate_m1_training_settings(env_cfg, train_cfg, num_envs=None):
+ 
+ def validate_m1_runtime(env, train_cfg):
+     validate_m1_training_settings(env.cfg, train_cfg, env.num_envs)
+-    if (not math.isclose(env.dt, .02, rel_tol=0., abs_tol=1e-9) or env.num_obs != 738
++    if (not matching_control_dt(env.dt, .02) or env.num_obs != 738
+             or env.num_actions != 29 or env.num_privileged_obs != 160):
+         raise ValueError("M1 runtime observation/action/control contract mismatch")
+ 
+@@ -121,6 +129,7 @@ def validate_m1_initialization(env_cfg, train_cfg, own, args):
+         if scales[key] != value:
+             raise ValueError("M1 requires B2 gait scales: " + key)
+     return dict(source_checkpoint=str(Path(path).resolve()), source_sha256=file_sha256(path),
++                source_control_dt=contract["dt"], requested_control_dt=expected["dt"],
+                 source_iteration=checkpoint["iter"], source_kind="M1_resume" if args.resume else "trained_B2",
+                 teacher_sha256=teacher_hash, reference_sha256=reference_hash,
+                 source_gait_geometry=contract["environment"]["gait_geometry"],
+diff --git a/rsl_rl/rsl_rl/runners/teacher_warmup_on_policy_runner.py b/rsl_rl/rsl_rl/runners/teacher_warmup_on_policy_runner.py
+index 8dcec5c..87fa9f9 100644
+--- a/rsl_rl/rsl_rl/runners/teacher_warmup_on_policy_runner.py
++++ b/rsl_rl/rsl_rl/runners/teacher_warmup_on_policy_runner.py
+@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
+ 
+ from .carry_locomotion_on_policy_runner import CarryLocomotionOnPolicyRunner
+ from rsl_rl.algorithms.teacher_warmup_ppo import TeacherWarmupPPO
+-from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint
++from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint, matching_control_dt
+ from rsl_rl.mixed_command_metrics import MixedCommandMetrics
+ 
+ 
+@@ -208,7 +208,15 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
+ 
+     def load(self, path):
+         checkpoint = read_checkpoint(path)
+-        if self._resume_contract(checkpoint.get("handoff_contract")) != self._resume_contract(self.contract):
++        saved = self._resume_contract(checkpoint.get("handoff_contract"))
++        requested = self._resume_contract(self.contract)
++        if (isinstance(saved, dict) and isinstance(requested, dict)
++                and saved.get("task") == requested.get("task") == "carrybox_teacher_warmup_mixed"
++                and matching_control_dt(saved.get("dt"), requested.get("dt"))):
++            # _resume_contract returns a copy for M1. Keep exact comparisons for
++            # every other field, and preserve the serialized source checkpoint.
++            saved["dt"] = requested["dt"]
++        if saved != requested:
+             raise ValueError("Resume contract differs (teacher, joints, adapter, loss or reference)")
+         self.alg.actor_critic.load_state_dict(checkpoint["model_state_dict"], strict=True)
+         self.alg.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+diff --git a/rsl_rl/rsl_rl/teacher_handoff.py b/rsl_rl/rsl_rl/teacher_handoff.py
+index cd376dd..3382622 100644
+--- a/rsl_rl/rsl_rl/teacher_handoff.py
++++ b/rsl_rl/rsl_rl/teacher_handoff.py
+@@ -1,5 +1,6 @@
+ """Simulator-independent checkpoint and control contracts for teacher handoff."""
+ import hashlib
++import math
+ import re
+ 
+ import torch
+@@ -8,6 +9,14 @@ from torch import nn
+ TEACHER_WARMUP, HANDOFF_TRANSITION, STUDENT_CARRY = range(3)
+ 
+ 
++def matching_control_dt(actual, expected):
++    """Allow <=1 ns of SimParams float32 representation error, not a changed timestep."""
++    return (isinstance(actual, (int, float)) and not isinstance(actual, bool)
++            and isinstance(expected, (int, float)) and not isinstance(expected, bool)
++            and math.isfinite(actual) and math.isfinite(expected) and actual > 0 and expected > 0
++            and math.isclose(actual, expected, rel_tol=0., abs_tol=1e-9))
++
++
+ def read_checkpoint(path):
+     # These are explicitly supplied, trusted training checkpoints.
+     try:
+diff --git a/experiments/teacher_warmup/tests/test_m1_timestep.py b/experiments/teacher_warmup/tests/test_m1_timestep.py
+new file mode 100644
+--- /dev/null
++++ b/experiments/teacher_warmup/tests/test_m1_timestep.py
+@@ -0,0 +1,111 @@
++"""Reproduce Isaac Gym SimParams float32 dt metadata without requiring Isaac Gym."""
++import copy
++import ctypes
++import math
++import sys
++from types import SimpleNamespace as NS
++
++import pytest
++import torch
++
++from test_mixed_loco import configs, checkpoint_fixture, as_dict
++from test_teacher_warmup import load_script, SyntheticVecEnv
++from rsl_rl.teacher_handoff import matching_control_dt, file_sha256
++from rsl_rl.runners.teacher_warmup_on_policy_runner import TeacherWarmupOnPolicyRunner
++
++CONTROL_DT_FLOAT32 = ctypes.c_float(.005).value * 4
++
++
++@pytest.mark.parametrize("actual,expected", [(CONTROL_DT_FLOAT32, .02), (.02, CONTROL_DT_FLOAT32),
++                                            (.02, .02), (.02 + .5e-9, .02)])
++def test_timestep_comparison_only_accepts_representation_error(actual, expected):
++    assert matching_control_dt(actual, expected)
++
++
++@pytest.mark.parametrize("bad", [.01, .04, .02 + 2e-9, 0., -1., float("nan"), float("inf"),
++                                 None, ".02", True])
++def test_invalid_or_changed_timestep_rejected(bad):
++    assert not matching_control_dt(bad, .02)
++    assert not matching_control_dt(.02, bad)
++
++
++@pytest.mark.parametrize("resume", [False, True])
++def test_m1_contract_float32_dt_and_derived_push_interval(tmp_path, resume):
++    payload, spec, expected, _ = checkpoint_fixture(tmp_path)
++    saved = payload["handoff_contract"]
++    saved["dt"] = CONTROL_DT_FLOAT32
++    seconds = expected["environment"]["domain_rand"]["push_interval_s"]
++    saved["environment"]["domain_rand"]["push_interval"] = math.ceil(seconds / CONTROL_DT_FLOAT32)
++    assert saved["environment"]["domain_rand"]["push_interval"] != math.ceil(seconds / expected["dt"])
++    if resume:
++        saved["task"] = "carrybox_teacher_warmup_mixed"
++        saved["handoff"] = copy.deepcopy(expected["handoff"])
++    module = load_script("mixed_initialization")
++    before = copy.deepcopy(expected)
++    module.validate_m1_contract(payload, spec, expected, resume=resume)
++    assert expected == before
++    saved["dt"] = .01
++    with pytest.raises(ValueError, match=r"dt \(checkpoint=0.01, requested=0.02, tolerance=1e-9 s\)"):
++        module.validate_m1_contract(payload, spec, expected, resume=resume)
++
++
++def test_real_preflight_reads_float32_checkpoint_without_changing_config_or_file(tmp_path, monkeypatch):
++    payload, _, _, checkpoint = checkpoint_fixture(tmp_path)
++    cfg, ppo = configs()
++    teacher, reference = tmp_path / "teacher.pt", tmp_path / "posture.json"
++    teacher.write_bytes(b"teacher_fixture")
++    reference.write_bytes(b"reference_fixture")
++    cfg.handoff.teacher_checkpoint, cfg.handoff.posture_reference = str(teacher), str(reference)
++    saved = payload["handoff_contract"]
++    saved["dt"] = CONTROL_DT_FLOAT32
++    saved["environment"]["domain_rand"]["push_interval"] = math.ceil(cfg.domain_rand.push_interval_s / saved["dt"])
++    for key, path in (("teacher_sha256", teacher), ("reference_sha256", reference)):
++        saved[key] = saved["environment"]["b2_initialization"][key] = file_sha256(path)
++    torch.save(payload, checkpoint)
++    before_hash = file_sha256(checkpoint)
++    monkeypatch.setitem(sys.modules, "legged_gym.utils.helpers", NS(class_to_dict=as_dict))
++    module = load_script("mixed_initialization")
++    result = module.validate_m1_initialization(cfg, ppo, NS(student_checkpoint=str(checkpoint)),
++                                                NS(resume=False, resume_path=None))
++    assert result["source_control_dt"] == CONTROL_DT_FLOAT32
++    assert result["requested_control_dt"] == .02
++    assert cfg.sim.dt == .005 and not hasattr(cfg.domain_rand, "push_interval")
++    assert file_sha256(checkpoint) == before_hash
++    module.validate_m1_runtime(NS(cfg=cfg, num_envs=4096, dt=CONTROL_DT_FLOAT32, num_obs=738,
++                                 num_actions=29, num_privileged_obs=160), ppo)
++
++
++def test_actual_m1_runner_resume_accepts_dt_roundoff_but_b2_remains_exact(tmp_path):
++    _, _, _, source = checkpoint_fixture(tmp_path)
++    _, ppo = configs()
++    train = as_dict(ppo)
++    train["runner"].update(num_steps_per_env=4)
++    train["algorithm"].update(min_valid_samples=1, num_learning_epochs=1, num_mini_batches=1)
++    train.update(task="carrybox_teacher_warmup_mixed", handoff_contract={})
++    run = TeacherWarmupOnPolicyRunner(SyntheticVecEnv(source), train, str(source), str(tmp_path / "run"), "cpu")
++    run.load_init_policy(str(source))
++    run.learn(1)
++    run.writer.close()
++    checkpoint = tmp_path / "run/model_1.pt"
++    data = torch.load(checkpoint, weights_only=False)
++    data["handoff_contract"]["dt"] = CONTROL_DT_FLOAT32
++    portable = tmp_path / "portable.pt"
++    torch.save(data, portable)
++    resumed = TeacherWarmupOnPolicyRunner(SyntheticVecEnv(source), train, str(portable), str(tmp_path / "resume"), "cpu")
++    resumed.load(str(portable))
++    assert resumed.current_learning_iteration == 1
++    assert resumed.contract["dt"] == .02
++    data["handoff_contract"]["dt"] = .01
++    incompatible = tmp_path / "different_physics.pt"
++    torch.save(data, incompatible)
++    with pytest.raises(ValueError, match="Resume contract"):
++        resumed.load(str(incompatible))
++    # Legacy tasks retain the existing exact resume comparison.
++    data["handoff_contract"].pop("task")
++    data["handoff_contract"]["dt"] = CONTROL_DT_FLOAT32
++    legacy = tmp_path / "legacy_b2.pt"
++    torch.save(data, legacy)
++    resumed.contract.pop("task")
++    with pytest.raises(ValueError, match="Resume contract"):
++        resumed.load(str(legacy))
++    resumed.writer.close()

@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from .carry_locomotion_on_policy_runner import CarryLocomotionOnPolicyRunner
 from rsl_rl.algorithms.teacher_warmup_ppo import TeacherWarmupPPO
-from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint
+from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint, matching_control_dt
 from rsl_rl.mixed_command_metrics import MixedCommandMetrics
 
 
@@ -208,7 +208,15 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
 
     def load(self, path):
         checkpoint = read_checkpoint(path)
-        if self._resume_contract(checkpoint.get("handoff_contract")) != self._resume_contract(self.contract):
+        saved = self._resume_contract(checkpoint.get("handoff_contract"))
+        requested = self._resume_contract(self.contract)
+        if (isinstance(saved, dict) and isinstance(requested, dict)
+                and saved.get("task") == requested.get("task") == "carrybox_teacher_warmup_mixed"
+                and matching_control_dt(saved.get("dt"), requested.get("dt"))):
+            # _resume_contract returns a copy for M1. Keep exact comparisons for
+            # every other field, and preserve the serialized source checkpoint.
+            saved["dt"] = requested["dt"]
+        if saved != requested:
             raise ValueError("Resume contract differs (teacher, joints, adapter, loss or reference)")
         self.alg.actor_critic.load_state_dict(checkpoint["model_state_dict"], strict=True)
         self.alg.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
