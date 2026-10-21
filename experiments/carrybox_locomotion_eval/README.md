@@ -5,6 +5,21 @@ This is the carry-only, no-force benchmark for Actors trained with
 fixed `carryWith` reference frame, and does not use the full-task pickup/carry
 state machine in `carrybox_clean_perturb`.
 
+For A5/B2 checkpoints containing `handoff_contract`, the evaluator also loads
+the Actor architecture from the checkpoint and applies its saved action adapter
+(including arms/waist/legs target rates) to the previous executed action. It
+checks joint order, input/action dimensions, control period, PD configuration,
+action scale and clipping. It loads no critic/optimizer or Teacher for inference.
+The chosen controller is recorded in `run_metadata.json` under
+`policy_controller`. Original locomotion checkpoints without this contract
+retain their original inference path.
+
+This remains a **carry-reference-reset velocity benchmark**, not a Teacher
+pickup/handoff benchmark. Use the separate Teacher warmup evaluation for
+end-to-end pickup and handoff. A fixed-vx=0.8 B2 training run is not mixed-command
+training, even when it runs for 5000 iterations; testing all velocity families
+measures whether those abilities were retained outside the B2 fine-tuning command.
+
 ## Run
 
 ```bash

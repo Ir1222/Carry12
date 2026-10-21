@@ -1,0 +1,123 @@
+diff --git a/experiments/carrybox_locomotion_eval/evaluation/inference.py b/experiments/carrybox_locomotion_eval/evaluation/inference.py
+index 9f441a4..93b09ae 100644
+--- a/experiments/carrybox_locomotion_eval/evaluation/inference.py
++++ b/experiments/carrybox_locomotion_eval/evaluation/inference.py
+@@ -1,6 +1,7 @@
+ """Actor-only checkpoint loading with explicit architecture validation."""
+ 
+ import os
++import math
+ from pathlib import Path
+ 
+ import torch
+@@ -42,6 +43,17 @@ def build_actor_only_policy(env, train_cfg, checkpoint_path, device):
+     if one_step_dim - int(env.num_task_obs) != int(env.num_one_step_proprio_obs):
+         raise AssertionError("One-step task/proprio observation dimensions disagree")
+ 
++    resolved = resolve_checkpoint_path(checkpoint_path)
++    from rsl_rl.teacher_handoff import read_checkpoint, checkpoint_actor
++    checkpoint = read_checkpoint(resolved)
++    if checkpoint.get("handoff_contract") is not None:
++        actor, spec = checkpoint_actor(resolved, device)
++        policy = handoff_velocity_policy(env, actor, spec, checkpoint["handoff_contract"],
++                                         class_to_dict(env.cfg.control))
++        print("[ACTOR] handoff Actor-only load; checkpoint action adapter preserved; "
++              "carry-reference reset, no Teacher pickup")
++        return policy, resolved
++
+     actor_critic = ActorCritic(
+         actor_input_dim,
+         int(env.num_privileged_obs),
+@@ -50,8 +62,6 @@ def build_actor_only_policy(env, train_cfg, checkpoint_path, device):
+         **class_to_dict(train_cfg.policy),
+     ).to(device)
+ 
+-    resolved = resolve_checkpoint_path(checkpoint_path)
+-    checkpoint = torch.load(resolved, map_location=device)
+     if "model_state_dict" not in checkpoint:
+         raise KeyError(f"Checkpoint has no model_state_dict: {resolved}")
+     source = checkpoint["model_state_dict"]
+@@ -104,6 +114,69 @@ def build_actor_only_policy(env, train_cfg, checkpoint_path, device):
+     return actor_critic.act_inference, resolved
+ 
+ 
++def handoff_velocity_policy(env, actor, spec, contract, control_config):
++    """Evaluate an A5/B2 Actor with its trained adapter in the carry-only suite.
++
++    The benchmark's reference reset and velocity protocol remain unchanged.
++    This is a conditional locomotion test, not an end-to-end pickup evaluation.
++    The critic/optimizer and Teacher are never loaded for inference.
++    """
++    from rsl_rl.teacher_handoff import adapt_action, joint_groups
++    if spec["dims"][0] != env.num_obs or spec["dims"][-1] != env.num_actions:
++        raise ValueError("Handoff Actor observation/action dimensions differ from velocity evaluator")
++    expected = {"actor_obs": env.num_obs, "dof_names": list(env.dof_names),
++                "action_scale": env.cfg.control.action_scale}
++    for key, value in expected.items():
++        if contract.get(key) != value:
++            raise ValueError("Velocity evaluator differs from handoff contract: " + key)
++    saved_dt = contract.get("dt")
++    if (not isinstance(saved_dt, (int, float)) or not math.isfinite(saved_dt) or saved_dt <= 0
++            or not math.isclose(saved_dt, env.dt, rel_tol=0., abs_tol=1e-9)):
++        raise ValueError("Velocity evaluator differs from handoff contract: dt")
++    environment = contract.get("environment") or {}
++    if environment.get("control") != control_config:
++        raise ValueError("Velocity evaluator PD/control configuration differs from handoff training")
++    clip = env.cfg.normalization.clip_actions
++    if environment.get("normalization", {}).get("clip_actions") != clip:
++        raise ValueError("Velocity evaluator action clipping differs from handoff training")
++    if env.cfg.control.control_type != "P" or env.cfg.domain_rand.delay:
++        raise ValueError("Handoff velocity evaluation requires P control and no action delay")
++    handoff = contract.get("handoff", {})
++    mode = handoff.get("adapter")
++    if mode not in ("rate_limited", "hard"):
++        raise ValueError("Unknown saved handoff action adapter")
++    rates = torch.empty(env.num_actions, device=env.device, dtype=env.actions.dtype)
++    for group, ids in joint_groups(env.dof_names).items():
++        value = handoff.get("target_rate_" + group)
++        if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
++            raise ValueError("Invalid saved handoff joint rate: " + group)
++        rates[ids] = value
++    if handoff.get("joint_target_rates") is not None:
++        rates = env.actions.new_tensor(handoff["joint_target_rates"])
++    if rates.shape != (env.num_actions,) or not torch.isfinite(rates).all() or not (rates > 0).all():
++        raise ValueError("Invalid saved handoff joint target rates")
++    enabled = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
++    actor.eval()
++    actor.requires_grad_(False)
++
++    def policy(obs):
++        with torch.no_grad():
++            raw = actor(obs)
++            # Use the previous EXECUTED action, including the native reset step;
++            # no additional hidden history can leak between benchmark trials.
++            return adapt_action(raw, env.actions, rates, env.dt, env.cfg.control.action_scale,
++                                clip, enabled, mode)
++
++    policy.evaluation_metadata = {
++        "source": "checkpoint_handoff_contract", "adapter": mode,
++        "joint_target_rates_rad_s": rates.tolist(), "actor_dims": spec["dims"],
++        "teacher_pickup": False, "initialization": "fixed_carry_reference",
++        "scope": "carry-only velocity coverage with the saved Student controller",
++        "trace_action_semantics": "applied action after checkpoint adapter",
++    }
++    return policy
++
++
+ def assert_observation_compatibility(env, obs, requested_command):
+     expected_shape = (int(env.num_envs), int(env.actor_obs_length))
+     if tuple(obs.shape) != expected_shape:
+diff --git a/experiments/carrybox_locomotion_eval/evaluator.py b/experiments/carrybox_locomotion_eval/evaluator.py
+index 2fd3355..957d471 100644
+--- a/experiments/carrybox_locomotion_eval/evaluator.py
++++ b/experiments/carrybox_locomotion_eval/evaluator.py
+@@ -176,6 +176,9 @@ def evaluate(eval_args, legged_args):
+         metadata = {
+             "protocol_version": "contact_gated_v1", "status": "running",
+             "checkpoint": checkpoint_path, "checkpoint_sha256": _sha256(checkpoint_path),
++            "policy_controller": getattr(policy, "evaluation_metadata", {
++                "source": "original_carry_locomotion", "adapter": "native_action_clipping",
++                "teacher_pickup": False, "initialization": "fixed_carry_reference"}),
+             "git": _git_revision(), "suite": eval_args.suite, "protocol": eval_args.protocol,
+             "mode": eval_args.mode, "seeds": eval_args.seeds,
+             "carry_motion_ids": eval_args.carry_motion_ids,

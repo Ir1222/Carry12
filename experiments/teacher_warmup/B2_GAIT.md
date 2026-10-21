@@ -297,3 +297,42 @@ alone. Completion/grasp, velocity tracking, then gait determine the choice.
 
 **Recommendation is pending real training and evaluation.** No real performance
 table, learning curve, success rate, or preferred B2 checkpoint is asserted here.
+
+
+## Complete carry-only velocity benchmark (2026-10-21)
+
+The fixed-vx=0.8 handoff/gait evaluation is not the complete velocity benchmark.
+Use `experiments/carrybox_locomotion_eval/evaluator.py` for stand, vx, vy, yaw,
+mixed commands and step responses. A5/B2 checkpoints now use their saved
+rate limiter and inferred Actor architecture in this evaluator. The original
+locomotion Actor inference path remains unchanged. Control metadata records the
+adapter and that this suite uses fixed carry-reference resets without a Teacher.
+
+The original full grid is `--protocol both --mode all --seeds 1 2 3
+--carry_motion_ids 0 1 2 --carry_phases 0.25 0.5 0.75`: 1404 constant
+command attempts plus 108 five-segment sequences (1512 total attempts).
+Ranges are vx=[-0.6,1.2] m/s, vy=[-0.5,0.5] m/s, yaw=[-0.7,0.7] rad/s.
+It checks 32 mixed combinations (8 corners and 24 interior cases), as well
+as single-axis coverage and stopping/reversal/transient responses.
+
+```bash
+VELOCITY_OUT="/home/han/pyx/Carry12/experiments/carrybox_locomotion_eval/results/B2_4900_velocity_$(date +%Y%m%d_%H%M%S)"
+python /home/han/pyx/Carry12/experiments/carrybox_locomotion_eval/evaluator.py \
+  --resume_path "$B2_RUN" --suite train_distribution --protocol both --mode all \
+  --seeds 1 2 3 --carry_motion_ids 0 1 2 --carry_phases 0.25 0.5 0.75 \
+  --stable_hold 0.20 --settle_timeout 2.0 --warmup 0.20 --duration 3.0 \
+  --save_csv --output_dir "$VELOCITY_OUT" \
+  --rl_device cuda:0 --sim_device cuda:0 --pipeline gpu --headless
+python /home/han/pyx/Carry12/experiments/carrybox_locomotion_eval/analyze.py \
+  --runs "$VELOCITY_OUT"
+```
+
+Here `B2_RUN` is the full path to the B2 model_4900.pt file, not a directory.
+The full command grid matches the earlier mixed locomotion benchmark. Its
+initialization, horizon and conditional success denominators differ from the
+Teacher warmup task, so report carry-only velocity coverage separately from
+end-to-end pickup/handoff success. A fixed-vx B2 fine-tune may lose mixed-command
+abilities; testing those abilities does not mean B2 trained on those commands.
+Both evaluations are needed for the user's combined assessment. A protocol
+that starts each of these 1512 attempts with physical Teacher pickup has not
+been implemented by this carry-only compatibility change.

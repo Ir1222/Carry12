@@ -1,0 +1,30 @@
+{
+  "date_local": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "scope": "Carry-reference velocity evaluation compatibility for saved A5/B2 controllers",
+  "tests": {
+    "command": "python -m pytest experiments/carrybox_locomotion_eval/tests experiments/teacher_warmup/tests -q",
+    "result": "91 passed in 70.00s"
+  },
+  "python38_syntax": "passed",
+  "new_physical_evaluation_executed": false,
+  "training_executed": false,
+  "checkpoint_modified": false,
+  "original_training_configuration_modified": false,
+  "legacy_locomotion_actor_path": "retained; source Actor loaded without Critic/optimizer state",
+  "b2_controller": "checkpoint architecture and saved action adapter; previous executed env.actions used for rate limiting",
+  "initialization": "original fixed carryWith reference reset; no Teacher pickup",
+  "full_velocity_suite": {
+    "constant_attempts": 1404,
+    "step_sequence_attempts": 108,
+    "total_attempts": 1512,
+    "modes": [
+      "stand",
+      "vx",
+      "vy",
+      "yaw",
+      "mixed"
+    ]
+  },
+  "portable_patch": "experiments\\teacher_warmup\\fix_B2_velocity_eval.patch"
+}

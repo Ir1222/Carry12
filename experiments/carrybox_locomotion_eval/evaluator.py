@@ -176,6 +176,9 @@ def evaluate(eval_args, legged_args):
         metadata = {
             "protocol_version": "contact_gated_v1", "status": "running",
             "checkpoint": checkpoint_path, "checkpoint_sha256": _sha256(checkpoint_path),
+            "policy_controller": getattr(policy, "evaluation_metadata", {
+                "source": "original_carry_locomotion", "adapter": "native_action_clipping",
+                "teacher_pickup": False, "initialization": "fixed_carry_reference"}),
             "git": _git_revision(), "suite": eval_args.suite, "protocol": eval_args.protocol,
             "mode": eval_args.mode, "seeds": eval_args.seeds,
             "carry_motion_ids": eval_args.carry_motion_ids,
