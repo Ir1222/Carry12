@@ -38,12 +38,13 @@ def analyze(directory):
             episode = int(row["episode"])
             state = episodes.setdefault(episode, {"pickup": False, "eligible": False, "done": False,
                                                   "survived": dict.fromkeys(horizons, False),
-                                                  "previous_target": None})
+                                                  "previous_target": None, "handoff_success": False, "student_steps": 0})
             if state["done"]:
                 raise ValueError("Episode id reused after completion")
             total_steps += 1
             state["pickup"] |= bool(int(row["pickup"]))
             state["eligible"] |= bool(int(row["eligible"]))
+            state["handoff_success"] |= row.get("phase") == "2"
             state["done"] = bool(int(row["done"]))
             state["reason"] = int(row["reason"])
             state["warmup"] = float(row["warmup_s"])
@@ -63,6 +64,7 @@ def analyze(directory):
             if not controlled:
                 continue
             controlled_steps += 1
+            state["student_steps"] += 1
             for axis in squared_errors:
                 squared_errors[axis] += (float(row["command_" + axis]) - float(row["actual_" + axis])) ** 2
             for key in scalar_keys:
@@ -86,6 +88,9 @@ def analyze(directory):
     report = {"episodes": count,
               "pickup_success": sum(s["pickup"] for s in episodes.values()) / count,
               "handoff_eligibility_rate": eligible / count,
+              "handoff_success_rate": sum(s["handoff_success"] for s in episodes.values()) / count,
+              "student_carry_duration_mean_s": (sum(s["student_steps"] for s in episodes.values()) * manifest["dt"] / count
+                                                if "dt" in manifest else None),
               "end_to_end_completion": success / count,
               "handoff_conditional_completion": success / eligible if eligible else None,
               "warmup_mean_s": sum(s["warmup"] for s in episodes.values()) / count,

@@ -1,0 +1,46 @@
+{
+  "runtime": {
+    "interpreter": "D:\\Anaconda3\\python.exe",
+    "python": "3.11.3",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "isaacgym_import": false,
+    "isaacgym_error": "No module named 'isaacgym'",
+    "torch": "2.6.0+cpu",
+    "cuda_available": false
+  },
+  "blockers": [
+    "Isaac Gym import failed",
+    "CUDA is unavailable"
+  ],
+  "probe_only": true,
+  "production_settings": {
+    "num_envs": 4096,
+    "max_iterations": 10000,
+    "num_steps_per_env": 100,
+    "save_interval": 500,
+    "learning_rate": 5e-05,
+    "min_valid_samples": 2048
+  },
+  "smoke_iterations_per_case": 40,
+  "cases": [
+    {
+      "num_envs": 1024,
+      "status": "not_executed",
+      "peak_memory_bytes": null,
+      "env_steps_per_second": null
+    },
+    {
+      "num_envs": 2048,
+      "status": "not_executed",
+      "peak_memory_bytes": null,
+      "env_steps_per_second": null
+    },
+    {
+      "num_envs": 4096,
+      "status": "not_executed",
+      "peak_memory_bytes": null,
+      "env_steps_per_second": null
+    }
+  ],
+  "status": "blocked"
+}

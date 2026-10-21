@@ -12,11 +12,13 @@ def parse_args():
                                     epilog="Also accepts Isaac Gym flags: --task --num_envs --seed --max_iterations --headless --rl_device --resume --resume_path")
     parser.add_argument("--teacher_checkpoint", required=True)
     parser.add_argument("--student_checkpoint")
-    parser.add_argument("--ablation", choices=["A2", "A3", "A4", "A5"], default="A3")
-    parser.add_argument("--command_suite", choices=["fixed", "mixed"], default="fixed")
-    parser.add_argument("--fixed_command", type=float, nargs=3, default=[0.4, 0.0, 0.0])
+    parser.add_argument("--init_policy_path", help="Initialize Actor and std; alias of --student_checkpoint")
+    parser.add_argument("--ablation", choices=["A2", "A3", "A4", "A5"], default=None)
+    parser.add_argument("--command_suite", choices=["fixed", "mixed"], default=None)
+    parser.add_argument("--fixed_command", type=float, nargs=3, default=None)
     parser.add_argument("--posture_reference", default="")
     parser.add_argument("--handoff_config", help="JSON overrides: handoff, algorithm, rewards, gait, runner, env, train")
+    parser.add_argument("--smoke_report", help="M1-only CUDA performance report; used by m1_smoke.py")
     own, remaining = parser.parse_known_args()
     # Isaac Gym must be imported before PyTorch.
     __import__("isaacgym")  # Must initialize before importing torch.
@@ -36,13 +38,17 @@ def parse_args():
 def apply_configuration(env_cfg, train_cfg, own):
     h = env_cfg.handoff
     h.teacher_checkpoint = str(Path(own.teacher_checkpoint).resolve())
-    h.ablation = own.ablation
-    h.command_suite = own.command_suite
-    h.fixed_command = own.fixed_command
-    h.posture_reference = str(Path(own.posture_reference).resolve()) if own.posture_reference else ""
-    h.adapter = "rate_limited" if own.ablation in ("A1", "A5") else "hard"
-    train_cfg.algorithm.handoff_imitation_coef = 0.0 if own.ablation in ("A0", "A1", "A2") else 0.5
-    env_cfg.rewards.scales.carry_upper_body_pose = 0.5 if own.ablation in ("A4", "A5") else 0.0
+    if own.posture_reference:
+        h.posture_reference = str(Path(own.posture_reference).resolve())
+    # Absent CLI values retain the selected Python task (or legacy JSON) defaults.
+    for key in ("ablation", "command_suite", "fixed_command"):
+        value = getattr(own, key, None)
+        if value is not None:
+            setattr(h, key, value)
+    if own.ablation is not None:
+        h.adapter = "rate_limited" if h.ablation in ("A1", "A5") else "hard"
+        train_cfg.algorithm.handoff_imitation_coef = 0.0 if h.ablation in ("A0", "A1", "A2") else 0.5
+        env_cfg.rewards.scales.carry_upper_body_pose = 0.5 if h.ablation in ("A4", "A5") else 0.0
     if own.handoff_config:
         with open(own.handoff_config, encoding="utf-8") as stream:
             overrides = json.load(stream)
@@ -60,9 +66,14 @@ def apply_configuration(env_cfg, train_cfg, own):
                         or callable(getattr(targets[section], key))):
                     raise ValueError("Unknown configuration key: " + key)
                 setattr(targets[section], key, value)
+    if hasattr(h, "mixed_command_manager"):
+        for key in ("ablation", "command_suite", "fixed_command"):
+            value = getattr(own, key, None)
+            if value is not None:
+                setattr(h, key, value)
     env_cfg.env.episode_length_s = (h.warmup_timeout_s + h.transition_timeout_s + h.student_timeout_s + 5)
-    if train_cfg.runner.run_name != "A5_B2_gait_fixed_vx08":
-        train_cfg.runner.run_name = own.ablation + "_" + h.command_suite
+    if train_cfg.runner.run_name == "A3_fixed":
+        train_cfg.runner.run_name = h.ablation + "_" + h.command_suite
 
 
 def validate_b2_initialization(env_cfg, train_cfg, own, args):
@@ -145,16 +156,29 @@ def validate_b2_initialization(env_cfg, train_cfg, own, args):
     return result
 
 
+def validate_initialization_arguments(args, own):
+    init = getattr(own, "init_policy_path", None) or getattr(args, "init_policy_path", None)
+    if init and own.student_checkpoint:
+        raise ValueError("Conflicting initialization arguments: use only one checkpoint path")
+    if args.finetune_path:
+        raise ValueError("Use --init_policy_path or --student_checkpoint")
+    own.student_checkpoint = init or own.student_checkpoint
+    if args.resume and (not args.resume_path or own.student_checkpoint):
+        raise ValueError("Resume requires --resume --resume_path and no initialization path")
+    if not args.resume and not own.student_checkpoint:
+        raise ValueError("New runs require --init_policy_path or --student_checkpoint")
+    if not args.resume and args.resume_path:
+        raise ValueError("--resume_path requires --resume")
+
+
 def main():
     args, own = parse_args()
-    if args.task != "carrybox_teacher_warmup":
-        raise ValueError("Use --task carrybox_teacher_warmup with this entrypoint")
-    if args.init_policy_path or args.finetune_path:
-        raise ValueError("Use --student_checkpoint for initialization")
-    if args.resume and (not args.resume_path or own.student_checkpoint):
-        raise ValueError("Resume requires --resume_path and no --student_checkpoint")
-    if not args.resume and not own.student_checkpoint:
-        raise ValueError("New runs require --student_checkpoint")
+    mixed = args.task == "carrybox_teacher_warmup_mixed"
+    if args.task not in ("carrybox_teacher_warmup", "carrybox_teacher_warmup_mixed"):
+        raise ValueError("Use a teacher warmup task with this entrypoint")
+    validate_initialization_arguments(args, own)
+    if own.smoke_report and not mixed:
+        raise ValueError("--smoke_report is only supported for M1")
     from legged_gym import LEGGED_GYM_ROOT_DIR
     from legged_gym.envs import task_registry
     from legged_gym.utils.helpers import class_to_dict, update_cfg_from_args
@@ -162,13 +186,28 @@ def main():
     env_cfg, train_cfg = task_registry.get_cfgs(args.task)
     apply_configuration(env_cfg, train_cfg, own)
     _, train_cfg = update_cfg_from_args(None, train_cfg, args)
-    provenance = validate_b2_initialization(env_cfg, train_cfg, own, args)
+    if mixed:
+        from mixed_initialization import validate_m1_initialization
+        provenance = validate_m1_initialization(env_cfg, train_cfg, own, args)
+    else:
+        provenance = validate_b2_initialization(env_cfg, train_cfg, own, args)
     if provenance is not None:
         env_cfg.seed = train_cfg.seed
     print("[Effective handoff] " + json.dumps({key: getattr(env_cfg.handoff, key) for key in
           ("warmup_vx", "fixed_command", "command_suite", "ablation", "adapter")}, sort_keys=True))
+    if own.smoke_report:
+        import torch
+        if not torch.cuda.is_available() or torch.device(args.rl_device).type != "cuda":
+            raise ValueError("M1 performance smoke requires a CUDA device")
+        torch.cuda.reset_peak_memory_stats(args.rl_device)
     env, _ = task_registry.make_env(args.task, args=args, env_cfg=env_cfg)
     cfg = class_to_dict(train_cfg)
+    cfg["effective_environment"] = class_to_dict(env.cfg)
+    from rsl_rl.teacher_handoff import file_sha256
+    source_path = args.resume_path if args.resume else own.student_checkpoint
+    cfg["initialization_provenance"] = provenance or dict(
+        source_checkpoint=str(Path(source_path).resolve()), source_sha256=file_sha256(source_path),
+        resumed=bool(args.resume), actor_std_only=not args.resume)
     cfg["handoff_contract"] = class_to_dict(env.cfg.handoff)
     # Teacher path is recorded separately by content hash, so moving a run is OK.
     cfg["handoff_contract"].pop("teacher_checkpoint")
@@ -182,17 +221,28 @@ def main():
     if getattr(env, "gait_enabled", False):
         # Runner persists this dict in both config.json and every checkpoint.
         cfg["environment_contract"].update(gait=class_to_dict(env.cfg.gait), gait_geometry=env.gait_geometry)
-        cfg["environment_contract"]["b2_execution"] = dict(num_envs=env.num_envs, seed=env.cfg.seed,
+        cfg["environment_contract"]["m1_execution" if mixed else "b2_execution"] = dict(num_envs=env.num_envs, seed=env.cfg.seed,
             rl_device=args.rl_device, num_steps_per_env=train_cfg.runner.num_steps_per_env,
             save_interval=train_cfg.runner.save_interval)
-        if provenance is not None:
+        if provenance is not None and not mixed:
             cfg["environment_contract"]["b2_initialization"] = provenance
-        print(f"[B2 effective] num_envs={env.num_envs} dt={env.dt} obs={env.num_obs} "
+        label = "M1" if mixed else "B2"
+        print(f"[{label} effective] num_envs={env.num_envs} dt={env.dt} obs={env.num_obs} "
               f"critic={env.num_privileged_obs} actions={env.num_actions} seed={train_cfg.seed}")
-        if (not math.isclose(env.dt, .02, rel_tol=0.0, abs_tol=1e-9)
+        if mixed:
+            from mixed_initialization import validate_m1_runtime
+            validate_m1_runtime(env, train_cfg)
+        elif (not math.isclose(env.dt, .02, rel_tol=0.0, abs_tol=1e-9)
                 or env.num_obs != 738 or env.num_actions != 29 or env.num_privileged_obs != 160
                 or env.num_envs != 512 or env.cfg.seed != 1):
             raise ValueError("B2 runtime observation/action/control contract mismatch")
+    if mixed:
+        cfg["task"] = args.task
+        cfg["initialization_provenance"] = provenance
+    if mixed and provenance["source_gait_geometry"] != env.gait_geometry:
+        raise ValueError("M1 gait geometry differs from the trained checkpoint")
+    if own.smoke_report:
+        cfg["performance_smoke_report"] = str(Path(own.smoke_report).resolve())
     root = Path(LEGGED_GYM_ROOT_DIR) / "logs" / train_cfg.runner.experiment_name
     log_dir = root / (datetime.now().strftime("%Y%m%d_%H%M%S_%f") + "_" + train_cfg.runner.run_name)
     log_dir.mkdir(parents=True, exist_ok=False)
@@ -210,10 +260,10 @@ def main():
             for key, value in runner.alg.actor_critic.state_dict().items():
                 if key.startswith("actor.") or key == "std":
                     if not torch.equal(value, source_state[key].to(value.device)):
-                        raise ValueError("A5 Actor/std initialization mismatch: " + key)
+                        raise ValueError("Source Actor/std initialization mismatch: " + key)
             if runner.alg.optimizer.state:
                 raise ValueError("B2 optimizer must start fresh")
-            print("[B2 init] Actor + std exactly equal A5; optimizer empty; critic newly initialized")
+            print("[Init] Actor + std exactly equal source; optimizer empty; critic newly initialized")
     runner.learn(train_cfg.runner.max_iterations, init_at_random_ep_len=False)
 
 

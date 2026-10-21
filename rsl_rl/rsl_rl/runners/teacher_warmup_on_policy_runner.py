@@ -12,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from .carry_locomotion_on_policy_runner import CarryLocomotionOnPolicyRunner
 from rsl_rl.algorithms.teacher_warmup_ppo import TeacherWarmupPPO
 from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint
+from rsl_rl.mixed_command_metrics import MixedCommandMetrics
 
 
 class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
@@ -46,6 +47,18 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
             "rewards": train_cfg.get("reward_contract"),
             "environment": train_cfg.get("environment_contract"),
         }
+        self.performance_smoke = None
+        if train_cfg.get("performance_smoke_report"):
+            from rsl_rl.m1_performance import PerformanceSmokeRecorder
+            self.performance_smoke = PerformanceSmokeRecorder(train_cfg["performance_smoke_report"], device,
+                env.num_envs, self.num_steps_per_env, self.save_interval)
+        self.initialization_provenance = train_cfg.get("initialization_provenance")
+        if train_cfg.get("task"):
+            self.contract["task"] = train_cfg["task"]
+        from collections import deque
+        self.running_episode_lengths = getattr(env, "episode_length_buf",
+            torch.zeros(env.num_envs, device=env.device)).float().clone()
+        self.completed_episode_lengths = deque(maxlen=100)
         self.writer = SummaryWriter(log_dir) if log_dir else None
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
@@ -60,8 +73,13 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
         self.alg.train_mode()
         for iteration in range(self.current_learning_iteration,
                                self.current_learning_iteration + num_learning_iterations):
+            if self.performance_smoke:
+                self.performance_smoke.begin_iteration()
             started = time.time()
             episode_logs = []
+            mixed_metrics = MixedCommandMetrics()
+            reward_sum = 0.
+            valid_samples = 0
             phase_counts = torch.zeros(3, device=self.env.device)
             tracking_sum = torch.zeros(3, device=self.env.device)
             tracking_count = 0
@@ -71,6 +89,9 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
                 for _ in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, critic)
                     obs, critic, rewards, dones, infos, ids, terminal_critic, _ = self.env.step(actions)
+                    self.running_episode_lengths += 1
+                    self.completed_episode_lengths.extend(self.running_episode_lengths[ids].cpu().tolist())
+                    self.running_episode_lengths[ids] = 0
                     next_critic = critic.clone()
                     next_critic[ids] = terminal_critic.clamp(
                         -self.env.cfg.normalization.clip_observations,
@@ -82,6 +103,11 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
                                           self.env.base_yaw_rate_world), -1)
                     command = getattr(self.env, "last_step_snapshot", {}).get(
                         "command", self.env.carry_policy_commands[:, :3])
+                    snapshot = getattr(self.env, "last_step_snapshot", {})
+                    actual = snapshot.get("actual", actual)
+                    mixed_metrics.update(snapshot, infos["student_valid"])
+                    valid_samples += int(infos["student_valid"].sum())
+                    reward_sum += float(rewards[infos["student_valid"]].sum())
                     tracking_sum += ((command - actual)[valid] ** 2).sum(0)
                     tracking_count += int(valid.sum())
                     physics_count += int(valid.sum())
@@ -90,11 +116,24 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
                     if "episode" in infos:
                         episode_logs.append({k: float(v) for k, v in infos["episode"].items()})
                 self.alg.compute_returns(critic)
+            if self.performance_smoke:
+                self.performance_smoke.rollout_done()
             losses = self.alg.update()
+            if self.performance_smoke:
+                self.performance_smoke.update_done()
             self.current_learning_iteration = iteration + 1
             elapsed = time.time() - started
             self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
+            mixed_values = mixed_metrics.scalars() if self.writer or self.performance_smoke else {}
             if self.writer:
+                if valid_samples:
+                    self.writer.add_scalar("Train/mean_reward", reward_sum / valid_samples, iteration)
+                self.writer.add_scalar("Train/valid_student_samples", valid_samples, iteration)
+                if self.completed_episode_lengths:
+                    self.writer.add_scalar("Train/mean_episode_length",
+                                           sum(self.completed_episode_lengths) / len(self.completed_episode_lengths), iteration)
+                for name, value in mixed_values.items():
+                    self.writer.add_scalar("Mixed/" + name, value, iteration)
                 for name, value in zip(("value", "surrogate", "policy_smoothness", "value_smoothness"), losses):
                     self.writer.add_scalar("Loss/" + name, value, iteration)
                 for name, value in self.alg.diagnostics.items():
@@ -117,14 +156,24 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
                 self.writer.add_scalar("Perf/fps", self.num_steps_per_env * self.env.num_envs / elapsed, iteration)
             print(f"[TeacherWarmup] iteration={iteration + 1} valid={self.alg.diagnostics['valid_ratio']:.3f} "
                   f"skipped={self.alg.diagnostics['skipped_update']:.0f} loss={losses[0]:.4f}")
+            checkpoint_seconds = 0.
             if (iteration + 1) % self.save_interval == 0:
+                saving_started = time.perf_counter()
                 self.save(os.path.join(self.log_dir, f"model_{iteration + 1}.pt"))
+                checkpoint_seconds = time.perf_counter() - saving_started
+            if self.performance_smoke:
+                self.performance_smoke.record(iteration + 1, self.alg.diagnostics, mixed_values, checkpoint_seconds, losses)
+        final_checkpoint_seconds = 0.
         if self.log_dir:
             final_path = os.path.join(self.log_dir, f"model_{self.current_learning_iteration}.pt")
             if not os.path.exists(final_path):
+                saving_started = time.perf_counter()
                 self.save(final_path)
+                final_checkpoint_seconds = time.perf_counter() - saving_started
         if self.writer:
             self.writer.flush()
+        if self.performance_smoke:
+            self.performance_smoke.finish(self.log_dir, final_checkpoint_seconds)
 
     def save(self, path, infos=None):
         if os.path.exists(path):
@@ -133,6 +182,7 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
                    "optimizer_state_dict": self.alg.optimizer.state_dict(),
                    "iter": self.current_learning_iteration, "infos": infos,
                    "handoff_contract": self.contract, "timesteps": self.tot_timesteps,
+                   "initialization_provenance": self.initialization_provenance,
                    "rng_torch": torch.get_rng_state(), "rng_numpy": np.random.get_state(),
                    "rng_python": random.getstate(),
                    "rng_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None}
@@ -140,9 +190,25 @@ class TeacherWarmupOnPolicyRunner(CarryLocomotionOnPolicyRunner):
         torch.save(payload, path + ".tmp")
         os.replace(path + ".tmp", path)
 
+    @staticmethod
+    def _resume_contract(contract):
+        # Environment count and save cadence do not change policy or dynamics.
+        # M1 can resume at another CLI environment count; legacy B2 remains exact.
+        if not isinstance(contract, dict) or contract.get("task") != "carrybox_teacher_warmup_mixed":
+            return contract
+        contract = copy.deepcopy(contract)
+        environment = contract.get("environment")
+        if environment is not None:
+            execution = environment.get("m1_execution", environment.get("b2_execution", {}))
+            if "num_steps_per_env" in execution:
+                environment["m1_rollout_steps"] = execution["num_steps_per_env"]
+            for key in ("m1_execution", "b2_execution"):
+                environment.pop(key, None)
+        return contract
+
     def load(self, path):
         checkpoint = read_checkpoint(path)
-        if checkpoint.get("handoff_contract") != self.contract:
+        if self._resume_contract(checkpoint.get("handoff_contract")) != self._resume_contract(self.contract):
             raise ValueError("Resume contract differs (teacher, joints, adapter, loss or reference)")
         self.alg.actor_critic.load_state_dict(checkpoint["model_state_dict"], strict=True)
         self.alg.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])

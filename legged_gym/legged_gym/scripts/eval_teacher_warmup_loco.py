@@ -11,13 +11,16 @@ def parse_args():
                                epilog="Also accepts Isaac Gym flags: --task --num_envs --seed --headless --rl_device")
     p.add_argument("--teacher_checkpoint", required=True)
     p.add_argument("--student_checkpoint", required=True)
-    p.add_argument("--ablation", choices=[f"A{i}" for i in range(6)], default="A0")
+    p.add_argument("--ablation", choices=[f"A{i}" for i in range(6)], default=None)
     p.add_argument("--episodes", type=int, default=20)
     p.add_argument("--carry_seconds", type=float, default=45.0)
-    p.add_argument("--command_suite", choices=["fixed", "mixed"], default="fixed")
-    p.add_argument("--fixed_command", type=float, nargs=3, default=[0.4, 0, 0])
+    p.add_argument("--command_suite", choices=["fixed", "mixed"], default=None)
+    p.add_argument("--fixed_command", type=float, nargs=3, default=None)
     p.add_argument("--posture_reference", default="")
     p.add_argument("--handoff_config")
+    p.add_argument("--eval_suite", choices=["fixed08", "stand", "vx_forward", "vx_backward", "vy_left",
+                                              "vy_right", "yaw_left", "yaw_right", "mixed"],
+                   help="Explicit command override, recorded in the manifest; M1 holds 0.8 before release")
     p.add_argument("--output", required=True)
     p.add_argument("--collect_teacher", action="store_true")
     p.add_argument("--gait_diagnostics", action="store_true",
@@ -58,17 +61,56 @@ def parse_args():
     return args, own
 
 
+def configure_evaluation(env_cfg, train_cfg, own, saved_contract, mixed_task):
+    from train_teacher_warmup_loco import apply_configuration
+    if mixed_task:
+        if not saved_contract:
+            raise ValueError("M1 evaluation requires a B2 or M1 handoff contract")
+        # Restore trained action-adapter and manager parameters BEFORE explicit command overrides.
+        for key, value in saved_contract["handoff"].items():
+            if hasattr(env_cfg.handoff, key):
+                setattr(env_cfg.handoff, key, value)
+        if saved_contract.get("task") != "carrybox_teacher_warmup_mixed" and not saved_contract.get("environment", {}).get("b2_initialization"):
+            raise ValueError("Comparison source must be trained B2 or M1")
+        env_cfg.handoff.command_suite = "mixed"
+    suite_commands = {"fixed08": [.8, 0., 0.], "stand": [0., 0., 0.],
+                      "vx_forward": [.8, 0., 0.], "vx_backward": [-.4, 0., 0.],
+                      "vy_left": [0., .3, 0.], "vy_right": [0., -.3, 0.],
+                      "yaw_left": [0., 0., .4], "yaw_right": [0., 0., -.4]}
+    if own.eval_suite:
+        own.command_suite = "mixed" if own.eval_suite == "mixed" else "fixed"
+        if own.eval_suite != "mixed":
+            own.fixed_command = suite_commands[own.eval_suite]
+    apply_configuration(env_cfg, train_cfg, own)
+    if own.eval_suite:
+        # Explicit suite overrides are evaluation-only, including with legacy JSONs.
+        env_cfg.handoff.command_suite = "mixed" if own.eval_suite == "mixed" else "fixed"
+        if own.eval_suite != "mixed":
+            env_cfg.handoff.fixed_command = suite_commands[own.eval_suite]
+    if mixed_task:
+        allowed = {"command_suite", "fixed_command", "student_timeout_s"}
+        for key, value in saved_contract["handoff"].items():
+            if key not in allowed and getattr(env_cfg.handoff, key) != value:
+                raise ValueError("Evaluation must preserve the trained handoff/adapter: " + key)
+
+
 def main():
     args, own = parse_args()
     import torch
     from legged_gym.envs import task_registry
     from legged_gym.utils.helpers import class_to_dict
     from rsl_rl.teacher_handoff import checkpoint_actor, file_sha256, read_checkpoint
-    from train_teacher_warmup_loco import apply_configuration
-    if args.task != "carrybox_teacher_warmup":
-        raise ValueError("Use --task carrybox_teacher_warmup")
+    mixed_task = args.task == "carrybox_teacher_warmup_mixed"
+    if args.task not in ("carrybox_teacher_warmup", "carrybox_teacher_warmup_mixed"):
+        raise ValueError("Use a teacher warmup task")
+    if not mixed_task:
+        own.ablation = own.ablation or "A0"
+        own.command_suite = own.command_suite or "fixed"
+        if own.fixed_command is None:
+            own.fixed_command = [.4, 0., 0.]
     env_cfg, train_cfg = task_registry.get_cfgs(args.task)
-    apply_configuration(env_cfg, train_cfg, own)
+    saved_contract = read_checkpoint(own.student_checkpoint).get("handoff_contract")
+    configure_evaluation(env_cfg, train_cfg, own, saved_contract, mixed_task)
     env_cfg.handoff.student_timeout_s = own.carry_seconds
     env_cfg.env.episode_length_s = (env_cfg.handoff.warmup_timeout_s
                                    + env_cfg.handoff.transition_timeout_s + own.carry_seconds + 5)
@@ -79,6 +121,8 @@ def main():
         raise ValueError("Student observation/action contract mismatch")
     saved_contract = read_checkpoint(own.student_checkpoint).get("handoff_contract")
     if saved_contract:
+        if mixed_task and saved_contract.get("reference_sha256") != file_sha256(env.cfg.handoff.posture_reference):
+            raise ValueError("Evaluation posture reference differs from training")
         if saved_contract["teacher_sha256"] != file_sha256(own.teacher_checkpoint):
             raise ValueError("Evaluation teacher differs from the fine-tuning teacher")
         current_handoff = class_to_dict(env.cfg.handoff)
@@ -87,6 +131,12 @@ def main():
                 raise ValueError("Evaluation must use the training action adapter: " + key)
         if saved_contract["dof_names"] != list(env.dof_names) or saved_contract["action_scale"] != env.cfg.control.action_scale:
             raise ValueError("Evaluation joint order/action scaling differs from training")
+    if mixed_task:
+        if (saved_contract.get("rewards") != class_to_dict(env.cfg.rewards)
+                or saved_contract.get("environment", {}).get("gait") != class_to_dict(env.cfg.gait)
+                or saved_contract.get("dt") != env.dt
+                or saved_contract.get("environment", {}).get("gait_geometry") != env.gait_geometry):
+            raise ValueError("M1/B2 evaluation reward, gait geometry or timestep mismatch")
     gait = None
     if own.gait_diagnostics:
         from gait_diagnostics import (GaitDiagnostics, validate_a5_contract, evaluation_handoff_overrides,
@@ -109,7 +159,7 @@ def main():
         actor = env.teacher
     out = Path(own.output)
     out.mkdir(parents=True, exist_ok=False)
-    manifest = {"seed": args.seed, "ablation": own.ablation, "episodes": own.episodes,
+    manifest = {"seed": args.seed, "ablation": env.cfg.handoff.ablation, "episodes": own.episodes,
                 "kind": "full_teacher_physical_pickup" if own.collect_teacher else "dual_policy",
                 "teacher_sha256": file_sha256(own.teacher_checkpoint),
                 "student_sha256": file_sha256(own.student_checkpoint),
@@ -121,6 +171,22 @@ def main():
                 "num_envs": env.num_envs,
                 "physical_reset_configuration": {key: class_to_dict(getattr(env.cfg, key)) for key in
                     ("asset", "init_state", "domain_rand", "dataset", "terrain", "noise", "sim")}}
+    if mixed_task:
+        manifest.update(task=args.task, eval_suite=own.eval_suite, status="running",
+                        student_checkpoint=str(Path(own.student_checkpoint).resolve()),
+                        teacher_checkpoint=str(Path(own.teacher_checkpoint).resolve()),
+                        student_iteration=read_checkpoint(own.student_checkpoint)["iter"],
+                        reference_sha256=file_sha256(env.cfg.handoff.posture_reference),
+                        rewards=class_to_dict(env.cfg.rewards), gait_configuration=class_to_dict(env.cfg.gait),
+                        gait_geometry=env.gait_geometry,
+                        source_task=saved_contract.get("task", "B2"),
+                        checkpoint_handoff=saved_contract["handoff"],
+                        evaluation_command_override={"suite": env.cfg.handoff.command_suite,
+                                                     "fixed_command": env.cfg.handoff.fixed_command,
+                                                     "explicit_suite": own.eval_suite},
+                        evaluation_handoff_overrides={key: {"trained": saved_contract["handoff"].get(key), "evaluation": value}
+                            for key, value in class_to_dict(env.cfg.handoff).items()
+                            if key not in ("teacher_checkpoint", "posture_reference") and saved_contract["handoff"].get(key) != value})
     if own.b2_reward_smoke:
         manifest["kind"] = "original_A5_weights_with_B2_reward_smoke"
     if gait is not None:
@@ -151,12 +217,18 @@ def main():
                      if getattr(env, "gait_enabled", False) else [])
     clearance_fields = ([side + "_b2_clearance_error_m" for side in ("left", "right")]
                         if gait is not None and getattr(env, "gait_enabled", False) else [])
+    mixed_fields = (["target_mode", "command_hold", "command_ramp", "target_sampled",
+                     "target_vx", "target_vy", "target_yaw", "gait_slip", "gait_clearance",
+                     "gait_scuff", "gait_air_time", "gait_touchdown_air_time", "box_relative_speed", "hand_box_slip",
+                     "box_relative_x", "box_relative_y", "box_relative_z"] if mixed_task else [])
+    from rsl_rl.mixed_command_metrics import MixedCommandMetrics
+    mixed_metrics = MixedCommandMetrics()
     slots = list(range(env.num_envs))
     ages = [0.0] * env.num_envs
     next_episode = env.num_envs
     completed = 0
     with (out / "steps.csv").open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=base_fields + joint_fields + gait_fields + reward_fields + clearance_fields)
+        writer = csv.DictWriter(stream, fieldnames=base_fields + joint_fields + gait_fields + reward_fields + clearance_fields + mixed_fields)
         writer.writeheader()
         with torch.no_grad():
             obs, _ = env.reset()
@@ -175,6 +247,9 @@ def main():
                     obs, _, _, dones, infos, _, _, _ = env.step(student)
                     valid = infos["student_valid"]
                 snap = {k: v.cpu() for k, v in env.last_step_snapshot.items()}
+                if mixed_task:
+                    active = torch.tensor([slot is not None for slot in slots], dtype=torch.bool)
+                    mixed_metrics.update(snap, valid.cpu() & active)
                 for e, episode in enumerate(slots):
                     if episode is None:
                         continue
@@ -207,6 +282,17 @@ def main():
                         key = side + "_b2_clearance_error_m"
                         if key in clearance_fields:
                             row[key] = float(gait.b2_clearance[e, si]) - row[side + "_clearance_m"]
+                    if mixed_task:
+                        for key in ("target_mode", "command_hold", "command_ramp", "target_sampled"):
+                            row[key] = int(snap[key][e])
+                        for i, axis in enumerate(("vx", "vy", "yaw")):
+                            row["target_" + axis] = float(snap["target_command"][e, i])
+                        for key in ("gait_slip", "gait_clearance", "gait_scuff", "gait_air_time", "gait_touchdown_air_time", "box_relative_speed", "hand_box_slip"):
+                            values = snap[key][e]
+                            values = values[torch.isfinite(values)]
+                            row[key] = float(values.mean()) if values.numel() else ""
+                        for i, axis in enumerate("xyz"):
+                            row["box_relative_" + axis] = float(snap["box_relative_pos"][e, i])
                     writer.writerow(row)
                     if bool(dones[e]):
                         completed += 1
@@ -217,6 +303,10 @@ def main():
                         ages[e] = 0.0
     from analyze_teacher_warmup import analyze
     analyze(out)
+    if mixed_task:
+        (out / "mixed_summary.json").write_text(json.dumps(mixed_metrics.scalars(), indent=2), encoding="utf-8")
+        manifest["status"] = "complete"
+        (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if gait is not None:
         from analyze_gait_diagnostics import analyze_gait
         analyze_gait(out)

@@ -86,3 +86,10 @@ from .g1.carrybox_teacher_warmup_config import G1CfgPPO as G1TeacherWarmupPPO
 
 task_registry.register("carrybox_teacher_warmup", G1TeacherWarmup,
                        G1TeacherWarmupCfg(), G1TeacherWarmupPPO())
+
+from .g1.carrybox_teacher_warmup_mixed import LeggedRobot as G1TeacherWarmupMixed
+from .g1.carrybox_teacher_warmup_mixed_config import G1Cfg as G1TeacherWarmupMixedCfg
+from .g1.carrybox_teacher_warmup_mixed_config import G1CfgPPO as G1TeacherWarmupMixedPPO
+
+task_registry.register("carrybox_teacher_warmup_mixed", G1TeacherWarmupMixed,
+                       G1TeacherWarmupMixedCfg(), G1TeacherWarmupMixedPPO())
