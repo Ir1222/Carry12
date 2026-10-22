@@ -210,7 +210,11 @@ include approach/pickup quality and hold success.
 
 ## Validation and remaining work
 
-CPU audit, strict checkpoint loading, and **30 tensor/runtime-harness tests pass**.
+CPU audit, strict checkpoint loading, and **31 tensor/runtime-harness tests pass**.
+The first-reset regression specifically constructs contact buffers before any
+physics step; `contact_filt` is preallocated by this task because the parent
+creates it only during post_physics_step. The earlier test fixture already had
+that buffer and therefore did not catch the constructor-order omission.
 Tests exercise the production MotionLib, stage sampler, environment methods and
 actual HIMPPO optimization with legacy, mixed, and all-HOLD batches. The Gym
 boundary is replaced by a harness; these tests do not establish physical stability.

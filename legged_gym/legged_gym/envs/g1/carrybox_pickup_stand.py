@@ -12,6 +12,9 @@ from ..motionlib.pickup_stand_sampling import PickupStandMotionSampler
 class LeggedRobot(CarryBox):
     def _init_buffers(self):
         super()._init_buffers()
+        # reset() runs before the first physics step for loaded RSI. The parent
+        # otherwise creates this buffer only inside post_physics_step().
+        self.contact_filt = torch.zeros_like(self.last_contacts)
         self.motionlib = PickupStandMotionSampler(self.motionlib)
         from legged_gym import LEGGED_GYM_ROOT_DIR
         self.reset_kinematics = ResetKinematics(self.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR), self.dof_names)
