@@ -47,6 +47,7 @@ class HIMRolloutStorage:
             self.action_sigma = None
             self.next_critic_observations = None
             self.amp_observations = None
+            self.amp_stages = None
 
         def clear(self):
             self.__init__()
@@ -72,6 +73,8 @@ class HIMRolloutStorage:
         self.actions = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
         self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
         self.amp_observations = torch.zeros(num_transitions_per_env, num_envs, *amp_obs_shape, device=self.device)
+        # Allocated only for tasks opting in; legacy generator stays unchanged.
+        self.amp_stages = None
 
         # For PPO
         self.actions_log_prob = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
@@ -97,6 +100,11 @@ class HIMRolloutStorage:
         if self.next_privileged_observations is not None: self.next_privileged_observations[self.step].copy_(transition.next_critic_observations)
         self.actions[self.step].copy_(transition.actions)
         self.amp_observations[self.step].copy_(transition.amp_observations)
+        if transition.amp_stages is not None:
+            if self.amp_stages is None:
+                self.amp_stages = torch.full((self.num_transitions_per_env, self.num_envs), -1,
+                                             dtype=torch.long, device=self.device)
+            self.amp_stages[self.step].copy_(transition.amp_stages)
         self.rewards[self.step].copy_(transition.rewards.view(-1, 1))
         self.dones[self.step].copy_(transition.dones.view(-1, 1))
         self.values[self.step].copy_(transition.values)
@@ -188,5 +196,8 @@ class HIMRolloutStorage:
                 advantages_batch = advantages[batch_idx]
                 old_mu_batch = old_mu[batch_idx]
                 old_sigma_batch = old_sigma[batch_idx]
-                yield obs_batch, next_obs_batch, critic_observations_batch, actions_batch, next_critic_observations_batch, cont_batch, target_values_batch, advantages_batch, returns_batch, shortreturns_batch,\
-                       old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, amp_obs_batch
+                batch = (obs_batch, next_obs_batch, critic_observations_batch, actions_batch, next_critic_observations_batch, cont_batch, target_values_batch, advantages_batch, returns_batch, shortreturns_batch,
+                         old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, amp_obs_batch)
+                if self.amp_stages is not None:
+                    batch += (self.amp_stages[:-1].flatten(0, 1)[batch_idx],)
+                yield batch

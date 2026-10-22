@@ -1,0 +1,154 @@
+{
+  "source_skills": [
+    "pickUp",
+    "putDown",
+    "carryWith",
+    "loco"
+  ],
+  "no_relocation_skills": [
+    "pickUp",
+    "carryWith",
+    "loco"
+  ],
+  "selected_skills": [
+    "pickUp",
+    "loco"
+  ],
+  "pickup": [
+    {
+      "file": "legged_gym/resources/dataset/dataset_carrybox/pickUp/pickup1.pt",
+      "frames": 192,
+      "contact_index": 107,
+      "final_base_height": 0.7119472026824951,
+      "final_box_height": 0.8769629144607604,
+      "final_foot_height_difference": 0.04557675123214722,
+      "final_upright_loaded_pose": true,
+      "kinematic_hold_candidates_in_tail": 0,
+      "physically_validated_hold_states": 0,
+      "root_speed": {
+        "final": 0.5228433005470018,
+        "tail_min": 0.21148684121549227,
+        "tail_max": 0.5387708509538381
+      },
+      "root_angular_speed": {
+        "final": 1.170314081634567,
+        "tail_min": 0.6400800926096744,
+        "tail_max": 1.4822776024349111
+      },
+      "box_speed": {
+        "final": 0.4657256278302381,
+        "tail_min": 0.4657256278302381,
+        "tail_max": 0.9197034350020741
+      },
+      "joint_velocity_rms": {
+        "final": 2.4990932941436768,
+        "tail_min": 0.424096018075943,
+        "tail_max": 2.4990932941436768
+      }
+    },
+    {
+      "file": "legged_gym/resources/dataset/dataset_carrybox/pickUp/pickup2.pt",
+      "frames": 178,
+      "contact_index": 100,
+      "final_base_height": 0.7306534647941589,
+      "final_box_height": 0.8072061461200982,
+      "final_foot_height_difference": 0.048896610736846924,
+      "final_upright_loaded_pose": true,
+      "kinematic_hold_candidates_in_tail": 0,
+      "physically_validated_hold_states": 0,
+      "root_speed": {
+        "final": 0.38321049267362595,
+        "tail_min": 0.19801042746518357,
+        "tail_max": 0.38321049267362595
+      },
+      "root_angular_speed": {
+        "final": 3.762178979195893,
+        "tail_min": 0.9475670617953058,
+        "tail_max": 4.770510364194723
+      },
+      "box_speed": {
+        "final": 1.203663042899018,
+        "tail_min": 1.0022718377746385,
+        "tail_max": 1.203663042899018
+      },
+      "joint_velocity_rms": {
+        "final": 0.8224989771842957,
+        "tail_min": 0.6750037670135498,
+        "tail_max": 1.9201074838638306
+      }
+    },
+    {
+      "file": "legged_gym/resources/dataset/dataset_carrybox/pickUp/pickup3.pt",
+      "frames": 129,
+      "contact_index": 42,
+      "final_base_height": 0.7392044067382812,
+      "final_box_height": 0.8702342515298329,
+      "final_foot_height_difference": 0.13974928855895996,
+      "final_upright_loaded_pose": true,
+      "kinematic_hold_candidates_in_tail": 0,
+      "physically_validated_hold_states": 0,
+      "root_speed": {
+        "final": 0.059429898866434426,
+        "tail_min": 0.04882577601159773,
+        "tail_max": 0.3429524266454545
+      },
+      "root_angular_speed": {
+        "final": 1.5571990906421507,
+        "tail_min": 1.5419630048843227,
+        "tail_max": 1.906807368389842
+      },
+      "box_speed": {
+        "final": 0.7922875165072721,
+        "tail_min": 0.7922875165072721,
+        "tail_max": 1.0664715990375324
+      },
+      "joint_velocity_rms": {
+        "final": 0.5189458727836609,
+        "tail_min": 0.5150834321975708,
+        "tail_max": 0.8822085857391357
+      }
+    }
+  ],
+  "available_expert_clips": 14,
+  "checkpoint": {
+    "path": "shared_artifacts\\2026-10-19\\carry_track\\model_33999.pt",
+    "actor_obs": 738,
+    "critic_obs": 126,
+    "actions": 29,
+    "amp_obs": 600,
+    "strict_actor_and_amp_load": true,
+    "urdf_matches_motion_joint_order": true,
+    "joint_order": [
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint",
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint"
+    ],
+    "historical_checkpoint_joint_metadata": null
+  }
+}

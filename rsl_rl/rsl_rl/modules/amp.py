@@ -121,6 +121,11 @@ class AMP(nn.Module):
             self.train()
             return torch.clamp(1 - 0.25 * torch.square(d - 1), min=0)
 
+    def combine_reward_for_stages(self, amp_reward, task_reward, stages):
+        """Opt-in dynamic AMP; inactive histories receive the entire task reward."""
+        active = (stages >= 0) & (stages < 2)
+        return torch.where(active, self.combine_reward(amp_reward, task_reward), task_reward)
+
     def combine_reward(self, amp_reward, task_reward, stage=None):
         if stage is not None:
             rewards = amp_reward * self.amp_coef * stage.to(self.device) + task_reward * (1 - self.amp_coef)

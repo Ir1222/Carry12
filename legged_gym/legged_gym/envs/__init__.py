@@ -36,6 +36,10 @@ from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 from .g1.carrybox import LeggedRobot as G1CarryBox
 from .g1.carrybox_config import G1Cfg as G1CarryBoxCfg
 from .g1.carrybox_config import G1CfgPPO as G1CarryBoxCfgPPO
+from .g1.carrybox_pickup_stand import LeggedRobot as G1PickupStand
+from .g1.carrybox_pickup_stand_config import G1Cfg as G1PickupStandCfg, G1CfgPPO as G1PickupStandPPO
+
+task_registry.register("carrybox_pickup_stand", G1PickupStand, G1PickupStandCfg(), G1PickupStandPPO())
 
 from .g1.carrybox_locomotion import LeggedRobot as G1CarryBoxLocomotion
 from .g1.carrybox_locomotion_config import (

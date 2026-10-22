@@ -149,13 +149,24 @@ class HIMOnPolicyRunner:
                     termination_ids = termination_ids.to(self.device)
                     termination_privileged_obs = termination_privileged_obs.to(self.device)
 
-                    self.alg.process_amp_state(amp_state)
+                    amp_stages = infos.get('amp_stage')
+                    if amp_stages is None:
+                        self.alg.process_amp_state(amp_state)
+                    else:
+                        amp_stages = amp_stages.to(self.device)
+                        self.alg.process_amp_state(amp_state, amp_stages)
                     amp_reward = self.alg.amp.predict_reward(amp_state, normalizer=self.alg.amp_normalizer).squeeze(1) * 0.5
 
                     next_critic_obs = critic_obs.clone().detach()
                     next_critic_obs[termination_ids] = termination_privileged_obs.clone().detach()
 
                     rewards = self.alg.amp.combine_reward(amp_reward, raw_rewards)
+                    if amp_stages is not None:
+                        # No discriminator reward or task downweighting on HOLD
+                        # and reset/mixed-stage histories. Legacy tasks unchanged.
+                        active = (amp_stages >= 0) & (amp_stages < 2)
+                        rewards = self.alg.amp.combine_reward_for_stages(amp_reward, raw_rewards, amp_stages)
+                        amp_reward = amp_reward * active
 
                     self.alg.process_env_step(rewards, dones, infos, next_critic_obs)
                 

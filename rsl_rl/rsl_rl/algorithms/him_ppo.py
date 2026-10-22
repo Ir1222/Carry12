@@ -172,8 +172,9 @@ class HIMPPO:
         self.transition.clear()
         self.actor_critic.reset(dones)
 
-    def process_amp_state(self, amp_state):
+    def process_amp_state(self, amp_state, stages=None):
         self.transition.amp_observations = amp_state
+        self.transition.amp_stages = stages
 
     def compute_returns(self, last_critic_obs):
         last_values= self.actor_critic.evaluate(last_critic_obs).detach()
@@ -188,8 +189,11 @@ class HIMPPO:
         
         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
 
-        for obs_batch, next_obs_batch, critic_obs_batch, actions_batch, next_critic_obs_batch, cont_batch, target_values_batch, advantages_batch, returns_batch, shortreturns_batch, old_actions_log_prob_batch, \
-            old_mu_batch, old_sigma_batch, amp_obs_batch in generator:
+        for batch in generator:
+                (obs_batch, next_obs_batch, critic_obs_batch, actions_batch, next_critic_obs_batch,
+                 cont_batch, target_values_batch, advantages_batch, returns_batch, shortreturns_batch,
+                 old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, amp_obs_batch) = batch[:14]
+                amp_stages = batch[14] if len(batch) == 15 else None
 
                 self.actor_critic.act(obs_batch)
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
@@ -248,8 +252,15 @@ class HIMPPO:
                 loss += smooth_loss
 
                 # amp loss
-                if self.amp is not None:
-                    amp_expert_obs_batch = self.motion_buffer.get_expert_obs(batch_size=obs_batch.shape[0]).to(self.device)
+                amp_loss = expert_loss = policy_loss = torch.zeros((), device=self.device)
+                if amp_stages is not None:
+                    active = (amp_stages >= 0) & (amp_stages < 2)
+                    amp_obs_batch = amp_obs_batch[active]
+                if self.amp is not None and len(amp_obs_batch):
+                    if amp_stages is None:
+                        amp_expert_obs_batch = self.motion_buffer.get_expert_obs(batch_size=obs_batch.shape[0]).to(self.device)
+                    else:
+                        amp_expert_obs_batch = self.motion_buffer.get_expert_obs_for_stages(amp_stages[active]).to(self.device)
                     if self.amp_normalizer is not None:
                         amp_expert_obs_batch = self.amp_normalizer.normalize(amp_expert_obs_batch)
                         amp_obs_batch = self.amp_normalizer.normalize(amp_obs_batch)
@@ -282,4 +293,3 @@ class HIMPPO:
         self.storage.clear()
 
         return mean_value_loss, mean_surrogate_loss, mean_amp_loss, mean_expert_loss, mean_policy_loss
-    
