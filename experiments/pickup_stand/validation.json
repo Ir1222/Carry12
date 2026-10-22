@@ -1,10 +1,10 @@
 {
   "branch": "research/pickup-stand",
-  "base_commit": "465fa311c6bc85a7576acd233c3863778d2dbe44",
+  "base_commit": "c3719aead082159eac2b9171af63958a9b5509af",
   "upstream_reference": "07bf22bdaf9c23c1d40366334a744c1816b6d42b",
   "cpu_tests": {
     "status": "passed",
-    "count": 52,
+    "count": 55,
     "command": "python -m pytest experiments/pickup_stand/tests -q",
     "runtime": "Python 3.12 / PyTorch 2.6 CPU",
     "local_pytest_note": "Loaded installed pytest from D:/Anaconda3/Lib/site-packages after initializing local PyTorch optimizer; used workspace basetemp."
@@ -59,5 +59,12 @@
     "shared_artifacts/2026-10-19/carry_track/model_33999.pt"
   ],
   "long_training_started": false,
-  "trained_success_metrics": "not measured"
+  "trained_success_metrics": "not measured",
+  "startup_parser_regression": {
+    "status": "passed",
+    "real_parent_constructor_executed_before_gym": true,
+    "zero_carry_range_accepted_by_new_task": true,
+    "original_carrybox_positive_speed_guard_preserved": true,
+    "timing_reward_and_command_fields_checked": true
+  }
 }

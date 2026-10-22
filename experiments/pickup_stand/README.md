@@ -238,9 +238,14 @@ training. Legacy checkpoint shape auditing remains available separately with
 
 ## Validation and unresolved issues
 
-* CPU tests: **52 passed**, including original-reward numerical comparison,
+* CPU tests: **55 passed**, including original-reward numerical comparison,
   collision-mesh/index audit, every predicate, reset distributions, phase semantics,
   command disabling, AMP filtering/mixing and checkpoint guards.
+* Startup regression executes the real CarryBox constructor up to the Gym
+  boundary. The new task owns its common configuration parser and accepts zero
+  carry command ranges; it never calls the parent's moving-carry-only positive
+  speed check. Timing, rewards, command-range buffers and terrain settings are
+  still parsed. The original CarryBox positive-speed validation is unchanged.
 * A two-iteration CPU training smoke runs the actual HIMOnPolicyRunner/HIMPPO and
   full 738D Actor, 126D Critic and 600D discriminator with a synthetic VecEnv.
   `torch.load` is forbidden during that test; all three networks update from

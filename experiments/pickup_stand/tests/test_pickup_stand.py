@@ -22,6 +22,14 @@ def source_without_imports(path, namespace):
     return namespace
 
 
+def load_class_to_dict():
+    tree = ast.parse((ROOT / 'legged_gym/legged_gym/utils/helpers.py').read_text(encoding='utf-8'))
+    namespace = {}
+    exec(compile(ast.Module(body=[n for n in tree.body if isinstance(n, ast.FunctionDef)
+        and n.name == 'class_to_dict'], type_ignores=[]), 'helpers.py', 'exec'), namespace)
+    return namespace['class_to_dict']
+
+
 logic = load_source('pickup_logic', 'legged_gym/legged_gym/envs/g1/pickup_stand_logic.py')
 sampling = load_source('pickup_sampling', 'legged_gym/legged_gym/envs/motionlib/pickup_stand_sampling.py')
 amp_module = load_source('pickup_amp', 'rsl_rl/rsl_rl/modules/amp.py')
@@ -233,7 +241,8 @@ def runtime_class():
         def check_termination(self):
             self.reset_buf = torch.zeros(self.num_envs, dtype=torch.bool)
     ns = {k: getattr(logic, k) for k in ('APPROACH', 'PICKUP', 'HOLD', 'advance_phase', 'completion_predicates', 'palm_box_contact', 'ResetKinematics', 'validate_reset_weights', 'per_foot_support')}
-    ns.update(CarryBox=Parent, torch=torch, gymapi=NS(DOMAIN_ENV=1), PickupStandMotionSampler=sampling.PickupStandMotionSampler,
+    ns.update(CarryBox=Parent, torch=torch, math=math, class_to_dict=load_class_to_dict(),
+              gymapi=NS(DOMAIN_ENV=1), PickupStandMotionSampler=sampling.PickupStandMotionSampler,
               quat_rotate_inverse=rotate_inverse)
     return source_without_imports('legged_gym/legged_gym/envs/g1/carrybox_pickup_stand.py', ns)['LeggedRobot']
 
@@ -307,6 +316,57 @@ def env(cfg, library):
     obj.extras = {}
     obj.has_seen_tag = torch.zeros(4, dtype=torch.bool)
     return obj
+
+
+def test_pickup_parser_accepts_zero_carry_commands_and_sets_sim_fields(env):
+    env.sim_params = NS(dt=.005)
+    env._parse_cfg(env.cfg)
+    assert env.dt == .02 and env.max_episode_length == 1000
+    assert env.max_episode_length_s == env.cfg.env.episode_length_s
+    assert env.cfg.domain_rand.push_interval == 500
+    assert env.cfg.commands.carry_moving_vx_range == [0., 0.]
+    assert env.command_ranges['lin_vel_x'] == [0., 0.]
+    assert env.reward_scales['carry_lin_vel_tracking'] == 0.
+    assert env.reward_scales['carry_yaw_vel_tracking'] == 0.
+    assert env.reward_scales['walk_task'] == 1.
+    assert env.cfg.terrain.curriculum is False
+
+
+@pytest.mark.parametrize('task', ['pickup', 'legacy'])
+def test_original_constructor_dispatches_parser_before_gym(cfg, task):
+    import copy
+    class GymBoundaryReached(Exception):
+        pass
+    class GymBoundary:
+        def __init__(self, *args, **kwargs):
+            raise GymBoundaryReached
+    original = ast.parse((ROOT / 'legged_gym/legged_gym/envs/g1/carrybox.py').read_text(encoding='utf-8'))
+    original_class = next(n for n in original.body if isinstance(n, ast.ClassDef) and n.name == 'LeggedRobot')
+    # Execute the real parent constructor and parser. Stub only BaseTask's Gym
+    # boundary, which CPU tests cannot enter; previously the harness skipped this.
+    parent = ast.ClassDef(name='OriginalCarryBoxStartup', bases=[ast.Name(id='GymBoundary', ctx=ast.Load())],
+        keywords=[], body=[n for n in original_class.body if isinstance(n, ast.FunctionDef)
+                          and n.name in ('__init__', '_parse_cfg')], decorator_list=[])
+    namespace = dict(GymBoundary=GymBoundary, LeggedRobotCfg=object, np=np, math=math,
+                     torch=torch, class_to_dict=load_class_to_dict())
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[parent], type_ignores=[])), 'carrybox_startup.py', 'exec'), namespace)
+    base = namespace['OriginalCarryBoxStartup']
+    if task == 'pickup':
+        configuration = copy.deepcopy(cfg)
+        constructor = source_without_imports('legged_gym/legged_gym/envs/g1/carrybox_pickup_stand.py',
+            dict(namespace, CarryBox=base))['LeggedRobot']
+    else:
+        configuration = type(cfg).__mro__[1]()
+        constructor = base
+    with pytest.raises(GymBoundaryReached):
+        constructor(configuration, NS(dt=.005), 0, 'cpu', True)
+    if task == 'pickup':
+        assert configuration.commands.carry_moving_vx_range == [0., 0.]
+    else:
+        # The original task still rejects stationary carry ranges.
+        configuration.commands.carry_moving_vx_range = [0., 0.]
+        with pytest.raises(ValueError, match='strictly positive'):
+            constructor(configuration, NS(dt=.005), 0, 'cpu', True)
 
 
 def test_runtime_direct_hold_zero_commands_and_no_walk(env):

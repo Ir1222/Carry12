@@ -1,4 +1,5 @@
 """G1 approaches, picks up and immediately holds. No loaded locomotion phase."""
+import math
 import torch
 from isaacgym import gymapi
 from isaacgym.torch_utils import quat_rotate_inverse
@@ -8,9 +9,24 @@ from .pickup_stand_logic import (APPROACH, PICKUP, HOLD, advance_phase,
                                   completion_predicates, palm_box_contact, ResetKinematics,
                                   validate_reset_weights, per_foot_support)
 from ..motionlib.pickup_stand_sampling import PickupStandMotionSampler
+from legged_gym.utils.helpers import class_to_dict
 
 
 class LeggedRobot(CarryBox):
+    def _parse_cfg(self, cfg):
+        # CarryBox's parser requires a positive moving-carry command range.
+        # This task has no moving-carry objective: parse the common simulator
+        # fields directly, without changing that range or the parent's guard.
+        self.dt = cfg.control.decimation * self.sim_params.dt
+        self.obs_scales = cfg.normalization.obs_scales
+        self.reward_scales = class_to_dict(cfg.rewards.scales)
+        self.command_ranges = class_to_dict(cfg.commands.ranges)
+        if cfg.terrain.mesh_type not in ('heightfield', 'trimesh'):
+            cfg.terrain.curriculum = False
+        self.max_episode_length_s = cfg.env.episode_length_s
+        self.max_episode_length = math.ceil(self.max_episode_length_s / self.dt)
+        cfg.domain_rand.push_interval = math.ceil(cfg.domain_rand.push_interval_s / self.dt)
+
     def _init_buffers(self):
         super()._init_buffers()
         # reset() runs before the first physics step for loaded RSI. The parent
