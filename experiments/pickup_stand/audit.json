@@ -110,45 +110,107 @@
     }
   ],
   "available_expert_clips": 14,
-  "checkpoint": {
-    "path": "shared_artifacts\\2026-10-19\\carry_track\\model_33999.pt",
-    "actor_obs": 738,
-    "critic_obs": 126,
-    "actions": 29,
-    "amp_obs": 600,
-    "strict_actor_and_amp_load": true,
-    "urdf_matches_motion_joint_order": true,
-    "joint_order": [
-      "left_hip_pitch_joint",
-      "left_hip_roll_joint",
-      "left_hip_yaw_joint",
-      "left_knee_joint",
-      "left_ankle_pitch_joint",
-      "left_ankle_roll_joint",
-      "right_hip_pitch_joint",
-      "right_hip_roll_joint",
-      "right_hip_yaw_joint",
-      "right_knee_joint",
-      "right_ankle_pitch_joint",
-      "right_ankle_roll_joint",
-      "waist_yaw_joint",
-      "waist_roll_joint",
-      "waist_pitch_joint",
-      "left_shoulder_pitch_joint",
-      "left_shoulder_roll_joint",
-      "left_shoulder_yaw_joint",
-      "left_elbow_joint",
-      "left_wrist_roll_joint",
-      "left_wrist_pitch_joint",
-      "left_wrist_yaw_joint",
-      "right_shoulder_pitch_joint",
-      "right_shoulder_roll_joint",
-      "right_shoulder_yaw_joint",
-      "right_elbow_joint",
-      "right_wrist_roll_joint",
-      "right_wrist_pitch_joint",
-      "right_wrist_yaw_joint"
+  "original_physhsi": {
+    "repository": "InternRobotics/PhysHSI",
+    "commit": "07bf22bdaf9c23c1d40366334a744c1816b6d42b",
+    "target_speed_loco": 0.85,
+    "hybrid_rsi": true,
+    "amp_features": 600,
+    "amp_coefficient": 0.25,
+    "sources": {
+      "legged_gym/legged_gym/envs/g1/carrybox.py": "e13e49e9e0341b3c87bc504c24f6c40586f189d1",
+      "legged_gym/legged_gym/envs/g1/carrybox_config.py": "9615b1f5f4f120e6d091efd83f2b0adf077096bc",
+      "rsl_rl/rsl_rl/runners/him_on_policy_runner.py": "ce4777f41086002ff5b9a289b3c290724afe8b15"
+    },
+    "adapted": [
+      "fixed-speed world-frame approach/facing",
+      "hand placement and box lifting",
+      "AMP + hybrid RSI"
     ],
-    "historical_checkpoint_joint_metadata": null
+    "excluded": [
+      "relocation",
+      "putDown",
+      "carryWith"
+    ],
+    "walk_task": "def _reward_walk_task(self):\n        robot2object_pos_reward = torch.exp(-0.5 * self.robot2object_dist)\n        global_lin_vel = self.rigid_body_states[:, self.upper_body_index, 7:10]\n        robot2object_vel = torch.sum(normalize(self.robot2object_dir) * global_lin_vel[:, :2], dim=-1)\n        robot2object_vel_reward = torch.exp(-5 * torch.square(self.cfg.rewards.target_speed_loco - robot2object_vel))\n\n        forward = quat_apply(self.base_quat, self.forward_vec)\n        heading = torch.atan2(forward[:, 1], forward[:, 0])\n        target_heading = torch.atan2(self.box_states[:, 1] - self.root_states[:, 1], self.box_states[:, 0] - self.root_states[:, 0])\n        yaw_error = torch.abs(wrap_to_pi(target_heading - heading))\n        start_heading_reward = torch.exp(-0.75 * yaw_error)\n\n        walk_reward = (self.cfg.rewards.robot2object_pos * robot2object_pos_reward +\n                       self.cfg.rewards.robot2object_vel * robot2object_vel_reward + \n                       self.cfg.rewards.start_heading * start_heading_reward)\n        \n        walk_reward[self.robot2object_dist < self.cfg.rewards.thresh_robot2object] = self.cfg.rewards.robot2object_pos + self.cfg.rewards.robot2object_vel + self.cfg.rewards.start_heading\n        walk_reward[self.object2goal_dist_xyz < self.cfg.rewards.thresh_object2goal] = self.cfg.rewards.robot2object_pos + self.cfg.rewards.robot2object_vel + self.cfg.rewards.start_heading\n\n        return walk_reward",
+    "carryup_task": "def _reward_carryup_task(self):\n        hand_pos = self.rigid_body_states[:, self.hand_pos_indices, :3]\n        hand2object_err = torch.sum((hand_pos.mean(dim=1) - self.box_states[:, :3]) ** 2, dim=-1)\n        hand2object_position_reward = torch.exp(-3 * hand2object_err)\n        \n        box_carryup_reward = torch.exp(-3 * torch.clamp(self.cfg.rewards.target_box_height - self.box_states[:, 2], min=0))\n        box_carryup_reward[self.box_states[:, 2] > self.cfg.rewards.target_box_height] = 1.0\n        box_carryup_reward[self.object2goal_dist_xy < 0.6] = 1.0\n        \n        carryup_reward = (self.cfg.rewards.hand_pos * hand2object_position_reward +\n                          self.cfg.rewards.box_height * box_carryup_reward)\n        \n        carryup_reward[self.robot2object_dist > self.cfg.rewards.thresh_robot2object] = 0.\n        carryup_reward[self.object2goal_dist_xyz < self.cfg.rewards.thresh_object2goal] = self.cfg.rewards.hand_pos + self.cfg.rewards.box_height\n        return carryup_reward"
+  },
+  "foot_geometry": {
+    "collision_meshes": {
+      "left_ankle_pitch_link": [
+        {
+          "file": "legged_gym/resources/robots/g1/meshes/left_ankle_pitch_link.STL",
+          "triangles": 1422,
+          "bounds_min": [
+            -0.02449999935925007,
+            -0.006442185025662184,
+            -0.02455790899693966
+          ],
+          "bounds_max": [
+            0.01150001771748066,
+            0.006557829678058624,
+            0.012889973819255829
+          ]
+        }
+      ],
+      "left_ankle_roll_link": [
+        {
+          "file": "legged_gym/resources/robots/g1/meshes/left_ankle_roll_link.STL",
+          "triangles": 13066,
+          "bounds_min": [
+            -0.06584136933088303,
+            -0.03774179145693779,
+            -0.035409145057201385
+          ],
+          "bounds_max": [
+            0.14236535131931305,
+            0.03784090280532837,
+            0.023583902046084404
+          ]
+        }
+      ],
+      "right_ankle_pitch_link": [
+        {
+          "file": "legged_gym/resources/robots/g1/meshes/right_ankle_pitch_link.STL",
+          "triangles": 1422,
+          "bounds_min": [
+            -0.02449999935925007,
+            -0.006557829678058624,
+            -0.02455790899693966
+          ],
+          "bounds_max": [
+            0.01150001771748066,
+            0.006442185025662184,
+            0.012889973819255829
+          ]
+        }
+      ],
+      "right_ankle_roll_link": [
+        {
+          "file": "legged_gym/resources/robots/g1/meshes/right_ankle_roll_link.STL",
+          "triangles": 13074,
+          "bounds_min": [
+            -0.06584136933088303,
+            -0.03784090280532837,
+            -0.035409145057201385
+          ],
+          "bounds_max": [
+            0.14236535131931305,
+            0.03774179145693779,
+            0.023583902046084404
+          ]
+        }
+      ]
+    },
+    "selected_support_links": [
+      "left_ankle_roll_link",
+      "right_ankle_roll_link"
+    ],
+    "previous_detection_links": [
+      "left_ankle_pitch_link",
+      "right_ankle_pitch_link"
+    ],
+    "preserve_amp_end_effector_links": true,
+    "isaac_gym_runtime_verified": false
   }
 }

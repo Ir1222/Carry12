@@ -6,26 +6,47 @@ import xml.etree.ElementTree as ET
 APPROACH, PICKUP, HOLD = 0, 1, 2
 
 
-def advance_phase(phase, contact_time, completion_time, near, bilateral, complete,
-                  dt, contact_seconds, completion_seconds):
-    contact_time = torch.where(near & bilateral, contact_time + dt, 0.)
-    phase = torch.where((phase == APPROACH) & (contact_time >= contact_seconds), PICKUP, phase)
+def advance_phase(phase, approach_time, completion_time, pickup_ready, complete,
+                  dt, approach_seconds, completion_seconds):
+    approach_time = torch.where((phase == APPROACH) & pickup_ready, approach_time + dt, 0.)
+    phase = torch.where((phase == APPROACH) & (approach_time >= approach_seconds), PICKUP, phase)
     completion_time = torch.where((phase == PICKUP) & complete, completion_time + dt, 0.)
     entered = (phase == PICKUP) & (completion_time >= completion_seconds)
-    return torch.where(entered, HOLD, phase), contact_time, completion_time, entered
+    return torch.where(entered, HOLD, phase), approach_time, completion_time, entered
 
 
-def completion_conditions(base_height, base_tilt, box_height, box_tilt,
+def completion_predicates(base_height, base_tilt, box_height, box_tilt,
                           clearance, bilateral, feet_down, relative_speed,
                           base_vertical_speed, box_vertical_speed, cfg):
-    # Deliberately no XY stillness test: completion immediately commands zero,
-    # and stillness is the *subsequent* hold objective, not a braking phase.
-    return ((base_height >= cfg.min_base_height) & (base_tilt <= cfg.max_base_tilt)
-            & (box_height >= cfg.min_box_height) & (box_height <= cfg.max_box_height)
-            & (box_tilt <= cfg.max_box_tilt) & (clearance >= cfg.min_clearance)
-            & bilateral & feet_down & (relative_speed <= cfg.max_relative_speed)
-            & (base_vertical_speed.abs() <= cfg.max_vertical_speed)
-            & (box_vertical_speed.abs() <= cfg.max_vertical_speed))
+    return dict(base_height=base_height >= cfg.min_base_height,
+                base_upright=base_tilt <= cfg.max_base_tilt,
+                box_height_min=box_height >= cfg.min_box_height,
+                box_height_max=box_height <= cfg.max_box_height,
+                box_upright=box_tilt <= cfg.max_box_tilt,
+                support_clearance=clearance >= cfg.min_clearance,
+                bilateral_contact=bilateral, both_feet_support=feet_down,
+                relative_speed=relative_speed <= cfg.max_relative_speed,
+                base_vertical_speed=base_vertical_speed.abs() <= cfg.max_vertical_speed,
+                box_vertical_speed=box_vertical_speed.abs() <= cfg.max_vertical_speed)
+
+
+def completion_conditions(*args, **kwargs):
+    return torch.stack(list(completion_predicates(*args, **kwargs).values()), -1).all(-1)
+
+
+def validate_reset_weights(weights, has_hold_bank):
+    weights = torch.as_tensor(weights, dtype=torch.float)
+    if weights.shape != (5,) or not torch.isfinite(weights).all() or (weights < 0).any() or weights.sum() <= 0:
+        raise ValueError('reset_weights must contain five finite nonnegative weights with positive sum')
+    if weights[0] > 0 and not has_hold_bank:
+        raise ValueError('Nonzero HOLD reset weight requires a validated HOLD bank; set weight[0] explicitly to zero')
+    return weights / weights.sum()
+
+
+def per_foot_support(contact_forces, indices, threshold):
+    """Positive world-Z force at each shoe collision body, never pitch-link norm."""
+    vertical = contact_forces[:, indices, 2]
+    return vertical > threshold, vertical
 
 
 def palm_box_contact(palms, box_position, box_quaternion, size, forces,

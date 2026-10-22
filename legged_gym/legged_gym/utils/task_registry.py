@@ -145,6 +145,10 @@ class TaskRegistry():
         
         
         train_cfg_dict = class_to_dict(train_cfg)
+        if getattr(train_cfg.runner, 'scratch_only', False):
+            # Task-specific opt-in; other tasks retain their existing load paths.
+            from .pickup_stand_experiment import assert_scratch_config
+            assert_scratch_config(train_cfg, args)
         runner = HIMOnPolicyRunner(env, train_cfg_dict, log_dir, device=args.rl_device)
         # Load state only after creating the runner and its new log directory.
         resume = train_cfg.runner.resume

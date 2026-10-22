@@ -305,13 +305,16 @@ class HIMOnPolicyRunner:
 
         
     def save(self, path, infos=None):
-        torch.save({
+        payload = {
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'amp_state_dict': self.alg.amp.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'iter': self.current_learning_iteration + 1,
             'infos': infos,
-            }, path)
+            }
+        if hasattr(self.env, 'policy_metadata'):
+            payload['policy_metadata'] = self.env.policy_metadata
+        torch.save(payload, path)
 
     def load(self, path, load_optimizer=True):
         loaded_dict = torch.load(path, map_location=self.device)

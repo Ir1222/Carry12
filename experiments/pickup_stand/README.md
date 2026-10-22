@@ -1,256 +1,284 @@
-# carrybox_pickup_stand
+# Scratch PhysHSI Approach → Pickup → Stand Hold
 
-Branch: `research/pickup-stand`, based on `velocity-tracking`.
+Branch: `research/pickup-stand` in `Ir1222/Carry12`. One Actor is trained from
+random initialization with AMP + PPO. No teacher, specialist, distillation,
+CarryWith locomotion, deceleration or walking-to-stop phase is present.
 
-The independent task is **APPROACH → PICKUP → HOLD**. It has no loaded walking,
-carryWith, moving-carry or walk-to-stop phase. Existing carrybox/carrybox_locomotion
-environment and configuration files are unchanged.
+## Comparison with original PhysHSI
 
-## Interface and control
+The comparison uses the locally available upstream commit
+[`07bf22bdaf9c23c1d40366334a744c1816b6d42b`](https://github.com/InternRobotics/PhysHSI/tree/07bf22bdaf9c23c1d40366334a744c1816b6d42b).
+`audit.py` reads the actual upstream Git blobs, checks the original functions and
+records their blob hashes and source in `audit.json`; it does not assume the
+velocity-tracking branch is original PhysHSI.
 
-The inherited actor receives six histories of 123 values (738 total): angular
-velocity, gravity, 29 joint positions, 29 joint velocities, five end effectors,
-29 previous actions, and the 15-value box/task observation. The critic receives
-126 values. The task does not append a phase indicator. Its commands, box geometry
-and proprioception supply the existing policy interface. Actions remain the same
-29 joint targets, action scale 0.25, P control, original joint order/gains/limits,
-5 ms simulation and 20 ms policy period. Box mass/size mixture, gravity,
-friction, collision and platform physics are inherited without changes.
+| Component | Original PhysHSI | This task |
+|---|---|---|
+| walk_task | World-frame speed toward box, fixed target_speed_loco=.85, position/facing | Same far-box formula and configurable .85 target; only APPROACH |
+| Near box | Approach terms saturate | Speed/position saturate, facing stays active until aligned |
+| carryup_task | Palm-midpoint alignment and box-height reward, plus goal exceptions | Same alignment/lifting formula without relocation/putdown goal exceptions |
+| AMP | 600D, .25 coefficient, runner's .5 AMP prediction scale | Same feature representation/scales, stage filtering for loco/pickUp |
+| Reset | .8 hybrid RSI, skill-weighted motions/default reset | Explicit default/loco approach + stratified pickup RSI distribution |
+| Relocation/putdown/carryWith | Part of original broader task | Excluded from task, resets, goals and AMP experts |
+| Training initialization | AMP + PPO | Random Actor, Critic, discriminator and fresh optimizer |
 
-`audit.json` records a strict load of the supplied Full AMP checkpoint into the
-actual ActorCritic and AMP implementations: actor 738→512→256→256→29, critic
-126→512→256→256→1, discriminator 600→512→256→1. A finite actor forward pass
-succeeded. Current URDF movable joints match joint_id.txt and default joint order.
-The old checkpoint has no joint-order metadata: historical provenance cannot be
-proved from the weights alone. The runtime rejects a different current joint order.
+The runtime inherits the current G1 simulator/PD/asset implementation for reuse,
+but defines its own objective and PPO configuration. Carry velocity tracking,
+heading hold, coupled velocity reward and carry contact reward scales are all
+explicitly zero. Command sampling and curriculum callbacks are disabled/overridden.
+The inherited hand-placement/lifting implementation is equivalent to the original
+PhysHSI pickup component after removing its relocation/goal shortcuts.
 
-## Reference and reset audit
+## Phases and observations
 
-`carrybox.yaml` has pickUp/putDown/carryWith/loco; `carrybox_no_relocation.yaml`
-still contains carryWith. The new YAML selects the original three pickup and
-eleven approach loco clips, with original weights. Neither carryWith nor putDown
-is loaded as an expert.
+* APPROACH rewards motion **toward the box** at `rewards.target_speed_loco=.85`
+  m/s and facing it. Speed is a task reward parameter, not a sampled velocity
+  command. Distance <.7 m and facing error ≤.50 rad for .10 s enter PICKUP.
+* PICKUP starts with reaching/grasping, before bilateral contact is mandatory.
+  It rewards inherited hand placement/lifting, bilateral grasp, standing up and
+  continuous loaded balance. It has no forward-motion objective.
+* HOLD requires verified pickup completion, targets loaded standing and low
+  base/box motion, and penalizes lost support/unnecessary foot motion. Small
+  corrective actions are allowed. Stable hold for `success_hold_seconds=3.0`
+  marks success and ends the episode by default, with a terminal bonus of 5.
 
-The final frames look upright and loaded, but do not describe static two-foot
-standing. Measured at 60 Hz, with box Z corrected exactly as MotionLib resets it:
+Actor shape remains 738 = six histories of 123; Critic remains 126 and actions
+remain 29 in the original G1 joint order. The last three values of **each** Actor
+history and of the Critic task observation are now `[APPROACH,PICKUP,HOLD]`
+one-hot. Both normal observations, terminal Critic observations and reset history
+seeding use these semantics. Box/proprioception noise behavior is retained.
 
-| Motion | Final base height m | Final root speed m/s | Final root angular speed rad/s | Final box speed m/s | Final joint velocity RMS rad/s | Foot height difference m |
-|---|---:|---:|---:|---:|---:|---:|
-| pickup1 | .712 | .523 | 1.170 | .466 | 2.499 | .046 |
-| pickup2 | .731 | .383 | 3.762 | 1.204 | .822 | .049 |
-| pickup3 | .739 | .059 | 1.557 | .792 | .519 | .140 |
+All internal velocity command buffers remain zero in every phase. They no longer
+drive observations or reward. Phase semantics are tagged
+`pickup_stand_phase_onehot_v2` in saved checkpoints; the same numerical input
+shape does **not** make legacy command-conditioned weights semantically compatible.
 
-No clip passes even the kinematic stationary-candidate screen during its last
-0.5 s. Reference poses contain no measured contact forces, so a kinematic pass
-would still not establish physical validity. No reference frame is labeled HOLD,
-no velocities are zeroed to fabricate a static state, and no static AMP expert
-is synthesized. See `audit.py`/`audit.json` for the complete inspection.
+PD gains, action scale .25, torque/joint limits, 29D ordering, box physics and
+the 5 ms simulation / 20 ms policy period are retained. Existing `carrybox` and
+`carrybox_locomotion` environment/configuration files and robot assets are unchanged.
 
-MotionLib hardcodes a pickUp contact_index allocation, but has no mandatory
-carryWith load dependency. Its putDown goal accessor is never called here. The
-parent box reset loops over pickUp/carryWith with guards; the absent skill is
-safe. This task bypasses the parent's skill sampler and excludes its default RSI
-root-velocity randomization. Robot, box, platform and phase share exact motion/time
-IDs. The root's corrected Z derivative and box linear/yaw derivatives are retained;
-the supported, pre-grasp box remains stationary. All selected skipped RSI ranges
-are empty. No putDown reset/goal is used. MotionLib's original RPY-based root angular
-velocity approximation and heading-only box orientation remain reference limitations.
+## Foot support fix and completion diagnostics
 
-The task adapter clamps interpolation inside each clip, including the final ceil
-index (the original history helper can leak into the next clip). Dynamic experts
-use fixed physical 50 Hz history spacing; time-warp augmentation is omitted to
-avoid changing time spacing without recomputing derivative features.
+The old detector checked `ankle_pitch_link`. The URDF's shoe collision meshes are
+on **left/right_ankle_roll_link**, connected through separate revolute joints with
+`collapse_fixed_joints=False`. The roll mesh is about .208 m long and .0756 m wide;
+the pitch mesh is a small ankle component. A supported roll link need not produce
+any force on the pitch link. That explains a concrete false-negative mechanism;
+it does not prove that every baseline episode satisfies the remaining checks.
 
-## Transitions and thresholds
+The task resolves support rows explicitly with
+`find_actor_rigid_body_index(..., gymapi.DOMAIN_ENV)`, checking the three-body
+platform/target-platform/box prefix of the per-environment tensor. Each foot must
+have **positive world-Z force >10 N**, separately. Norms, absolute negative forces,
+or support from only one foot do not qualify. Pitch-link force is logged alongside
+roll-link force to expose the previous error. Support/slip/footstep rewards use
+the roll bodies. Original pitch-link end effectors remain in the AMP observation,
+preserving its 600D motion convention.
 
-Distances are metres, angles radians, velocities m/s and rad/s. Thresholds are
-configuration values in `pickup_stand`, intended for simulator validation/tuning.
+The original completion thresholds were **not relaxed**. Every predicate is
+logged as `completion/<name>`; underlying measurements use `completion_value/`:
 
-* APPROACH keeps the inherited heading/box approach reward and samples forward
-  speed in [.2,.8]. Bilateral box contact within .7 m for .10 s enters PICKUP.
-* PICKUP stops task movement commands immediately on grasp; the inherited hand
-  placement, lifting and contact rewards remain active. It never requests loaded
-  forward motion while waiting to stand up.
-* Completion requires .20 s of uninterrupted evidence: pelvis height ≥.70 above
-  terrain, torso tilt ≤.25, box center height [.67,1.05], box tilt ≤.25, box bottom
-  ≥.08 above both ground and source platform top, bilateral contact, both feet
-  vertical forces >10 N, box/root relative speed ≤.20, and root/box vertical
-  speeds ≤.15. These reject a lifted box during a crouch, a tossed box, support
-  from the platform, unilateral grasp, and an unfinished upward swing. XY speed
-  is deliberately not a completion gate; a completed lift immediately enters HOLD
-  even if residual horizontal momentum still needs balance correction.
-* HOLD is irreversible until reset. All command components remain zero, velocity
-  tracking gates are active with zero targets, and the approach reward is zero.
-  Failed physical completion conditions for >.50 s terminate a dropped/unloaded
-  hold. Original fall/timeout conditions still apply.
-
-Bilateral contact requires >1 N net force on each rubber hand, each palm within
-.06 m of opposing box-local Y faces and near the box surface. Force alone could
-come from the platform/floor, so geometry and opposite sides are required too.
-This remains a geometric proxy for a collision-pair contact sensor; verify its
-6 cm allowance against actual hand collision geometry in Gym.
-
-Stable HOLD additionally requires full base/box linear speeds ≤.12, angular
-speeds ≤.20, and each foot speed ≤.08 for .50 s. Successful hold duration is the
-longest continuous interval satisfying these checks; success requires 3 s.
-Pickup-to-stable delay is measured from completion to the **start** of the first
-validated .50 s stable interval. Missing stable holds are reported as missing,
-not a zero-second success. HOLD-reset episodes are excluded from pickup success.
-
-## Rewards and AMP
-
-Inherited pickup/contact rewards and regularizers stay active. HOLD adds seven
-small terms: base horizontal/full angular stillness (.75), box linear/angular
-stillness (.75), bilateral contact (1), box height/orientation retention (.75),
-upright standing with a [.70,.88] pelvis-height dead zone and soft leg deviation
-(.75), two-foot contact/low foot speed (.5), and action-rate cost (-.02).
-Arms are free to find a loaded posture. There is no joint freeze, zero-joint-speed
-target, hard-coded action or displacement-based carry phase.
-
-The 600-value AMP observation is unchanged. Optional rollout stage metadata is
-stored separately. Expert minibatches are sampled from loco for APPROACH and
-pickUp for PICKUP. HOLD, initial histories and mixed-stage histories are excluded
-from both discriminator loss and normalization. At least ten consecutive policy
-steps in one dynamic phase are required after a reset/transition. Stage metadata
-and diagnostics are copied **before** autoreset. PPO still learns from all rows.
-
-Dynamic reward is .75 task + .25 AMP (including the inherited .5 AMP reward scale).
-HOLD/invalid-history reward is **1.0 task**, with no AMP contribution. All-HOLD
-minibatches produce zero discriminator loss and leave discriminator weights
-unchanged. Legacy tasks retain their original minibatch format, expert sampling
-and reward mixing unless they explicitly emit `amp_stage`.
-
-## Reset coverage and curriculum
-
-Reset columns are `[validated HOLD, early pickup, mid pickup, late pickup, full
-approach]`. Early spans [0,contact], mid spans the first half after contact and late
-spans the second half. A reference reset's phase is APPROACH before grasp and
-PICKUP afterward. Reference history is not falsely treated as static HOLD.
-
-| Stage | Default reset weights |
+| Predicate | Threshold |
 |---|---|
-| hold | .65, .05, .05, .20, .05 |
-| pickup | .20, .20, .25, .25, .10 |
-| full | .10, .10, .10, .15, .55 |
+| base_height | pelvis ≥.70 m above terrain |
+| base_upright | torso tilt ≤.25 rad |
+| box_height_min / box_height_max | box center [.67,1.05] m |
+| box_upright | box tilt ≤.25 rad |
+| support_clearance | box bottom ≥.08 m above ground and source-platform top |
+| bilateral_contact | >1 N on both rubber hands, palms within .06 m of opposing box Y surfaces |
+| both_feet_support | roll-link vertical force >10 N on each side |
+| relative_speed | box/root relative linear speed ≤.20 m/s |
+| base_vertical_speed / box_vertical_speed | each ≤.15 m/s in magnitude |
 
-Stage advancement is explicit, after evaluation. Nonzero early/mid/approach
-coverage, retained pickup AMP and a fixed 1e-4 learning rate protect pickup skills;
-they cannot guarantee absence of forgetting, so evaluate before promotion.
+All checks must persist for .20 s to enter HOLD. Horizontal stillness is not a
+prerequisite that creates a hidden moving-carry stage. Stable HOLD additionally
+requires base/box linear speed ≤.12 m/s, angular speed ≤.20 rad/s, and each support
+body speed ≤.08 m/s. The .50 s stability confirmation and configurable success
+duration use continuous, reset-safe timers. Failed completion conditions for
+>.50 s during HOLD terminate a failed hold. Original fall/timeout checks remain.
 
-There is **no validated HOLD bank available in this checkout**. By default the
-missing bank's weight is visibly reassigned to late dynamic pickup (warning),
-allowing a hold-focused bootstrap from the Full AMP actor. To require genuine
-loaded-standing reset coverage use `--hold-bank PATH --require-hold-bank`.
-The bank collector accepts only simulated states that pass all physical checks
-continuously for .50 s. It stores actual root/box/joint velocities, contact
-evidence, dimensions, mass and joint-order metadata. Empty collection fails; it
-never writes fabricated states. Loading rejects moving/invalid states or mismatched
-joint order. Sampling requires box dimensions within .015 m and mass within .15 kg;
-insufficient coverage fails explicitly. Use matching seed/env count for initial
-collection and training, or collect sufficient coverage of the mass/size mixture.
-Robot randomization and subsequent contact evolution require online revalidation
-after any bank reset; a saved row does not count as a new successful hold.
+The `loaded_balance` reward supplies continuous feedback **during late PICKUP**,
+even if a foot or stand-up predicate has not passed: lift progress × bilateral
+grasp × a weighted mixture of base/box stillness, standing posture, per-foot load,
+foot motion and box levelness. The soft `pickup_standup` term also operates before
+HOLD. Hard success checks therefore no longer gate all balance feedback.
 
-Reset histories are cleared per environment, seeded from reset robot/box state,
-and end-effector geometry comes from URDF forward kinematics. Initial observation
-rotation uses the reset torso orientation; torso gyro/linear velocity is seeded
-from root velocity (waist joint twist is refreshed by Gym on the first step).
-The first reset does not execute an unloaded zero action before policy inference.
-Terminal actions/contact histories cannot leak across autoresets.
+Net contact force plus palm geometry is still a proxy for collision-pair sensing.
+Shoe force is measured at the body; slip diagnostics use its body origin, not
+individual contact-point velocities. These limitations and contact-noise behavior
+need Isaac Gym validation; visual standing alone is never labeled validated.
 
-## Commands (run from repository root in the Isaac Gym training environment)
+## Rewards, AMP and resets
 
-Offline audit and CPU tests:
+Task rates: walk 1, carryup 1, pickup grasp .5, pickup stand-up .75, late-pickup
+loaded balance 1; HOLD base stillness .75, box stillness .75, contact 1, box pose
+.75, posture .75, feet .5, extra action-rate cost -.02 and footstep cost -.25.
+Original PhysHSI regularizers are listed explicitly. Terminal success is a bonus
+of 5, not a rate. No arm pose lock, joint freeze or zero-joint-velocity target is
+introduced. A soft leg-posture term leaves the arms free to support the load.
+
+Only the original eleven loco and three pickUp clips are loaded. Dynamic experts
+are sampled from loco in APPROACH and pickUp in PICKUP. The 600D representation
+is unchanged. HOLD and reset/mixed-stage histories never enter discriminator loss
+or normalization. Dynamic reward is .75 task + .25 AMP; HOLD/masked histories
+receive **1.0 task**. All-HOLD minibatches do not update discriminator weights.
+
+Pickup reference tails remain moving (see `audit.json`); no last-frame static
+expert or HOLD state is fabricated. Robot/box RSI uses matching clip/time IDs,
+preserves reference velocities, corrects root-Z differentiation, and clamps AMP
+interpolation to each clip. Parent terminal action/contact histories are cleared;
+reset end-effector geometry is computed with URDF FK before policy inference.
+
+`pickup_stand.reset_weights` columns are:
+
+```
+[validated_hold, early_pickup_RSI, mid_pickup_RSI, late_pickup_RSI, full_approach]
+default: [0, .20, .20, .20, .40]
+```
+
+Early pickup spans [start,contact], mid/late split the post-contact interval.
+**Every pickUp RSI state starts in PICKUP**, so its reaching segment uses pickup
+AMP too. Full approach starts unloaded: by default half from loco RSI and half
+from the default robot pose, controlled by `approach_rsi_probability=.50`.
+This gives 60% pickup RSI, 20% loco approach RSI and 20% default approach coverage.
+
+Weights must be finite, nonnegative, have positive sum and contain five entries;
+they are normalized explicitly. Nonzero HOLD weight without a bank is an error.
+There is no redistribution/fallback. A bank is optional with zero default weight.
+Version-2 banks must come from a phase-v2 policy's continuously validated simulated
+HOLD and retain actual velocities, force/contact evidence, size and mass.
+Version-1 banks based on the previous detector are rejected. Dimension/mass match
+tolerances remain .015 m/.15 kg. Revalidation after reset is still required.
+
+## Scratch initialization and evaluation isolation
+
+The dedicated entrypoint and the registered task's `scratch_only` runner guard
+reject `--finetune_path`, `--resume`, policy-init paths and legacy checkpoint flags
+for training. No Actor, Critic, AMP or optimizer state is imported. Before the
+first update, `.initialization.json` records empty optimizer state, iteration zero,
+parameter SHA256 hashes, `checkpoint_loaded=false`, reset weights and reward scales.
+
+`--checkpoint PATH` is accepted only by evaluate/collect. It requires matching
+phase-v2 task/observation/joint/architecture metadata and approach-speed semantics.
+The old `model_33999.pt` remains unchanged for independent legacy evaluation; it
+cannot be relabeled as a phase-conditioned scratch policy by matching shapes.
+
+## Ubuntu commands (repository root, existing physhsi environment)
+
+CPU checks and reproducible reference/mesh audit:
 
 ```bash
-python experiments/pickup_stand/audit.py --checkpoint shared_artifacts/2026-10-19/carry_track/model_33999.pt
 python -m pytest experiments/pickup_stand/tests -q
+python experiments/pickup_stand/audit.py
 ```
 
-Bounded integration smoke and baseline evaluation (no optimization):
+Validate actual Gym support indices/forces first. This uses an unloaded default
+PD stance with perturbations disabled and **no policy/checkpoint**. It requires
+every environment to demonstrate ≥.20 s of simultaneous two-foot support and low
+base speed, and saves raw force traces. A pass is not proof of loaded HOLD.
 
 ```bash
-python legged_gym/legged_gym/scripts/pickup_stand.py --mode smoke --steps 100 --num_envs 16 --headless --seed 1 --finetune_path shared_artifacts/2026-10-19/carry_track/model_33999.pt --output outputs/pickup_stand/smoke.json
-python legged_gym/legged_gym/scripts/pickup_stand.py --mode evaluate --steps 3000 --num_envs 256 --headless --seed 1 --reset-suite approach --finetune_path shared_artifacts/2026-10-19/carry_track/model_33999.pt --output outputs/pickup_stand/baseline.json
+python legged_gym/legged_gym/scripts/pickup_stand.py --mode contact-check --steps 500 --num_envs 16 --headless --seed 1 --output outputs/pickup_stand/contact_probe.json
 ```
 
-Optional bootstrap when collection from the original Actor yields no stable holds:
+Random-policy simulator smoke, then two bounded PPO training iterations:
 
 ```bash
-python legged_gym/legged_gym/scripts/pickup_stand.py --mode train --stage hold --num_envs 4096 --headless --seed 1 --max_iterations 2000 --finetune_path shared_artifacts/2026-10-19/carry_track/model_33999.pt
+python legged_gym/legged_gym/scripts/pickup_stand.py --mode smoke --steps 100 --num_envs 16 --headless --seed 1 --output outputs/pickup_stand/scratch_smoke.json
+python legged_gym/legged_gym/scripts/pickup_stand.py --mode train-smoke --smoke-iterations 2 --num_envs 32 --headless --seed 1 --output outputs/pickup_stand/train_smoke.json
 ```
 
-After selecting a checkpoint, replace `HOLD_CHECKPOINT`, `PICKUP_CHECKPOINT` and
-`FULL_CHECKPOINT` with actual saved paths. Collection writes validated.pt next to
-validated.json. Collection defaults to full approach; use `--reset-suite pickup`
-for more frequent pickup-to-hold attempts.
+`train-smoke` is bounded to ≤10 iterations and ≤128 environments, with 32 steps
+per rollout and two PPO epochs/minibatches. It records parameter updates and checks
+finite parameters. It loads no checkpoint. Do not infer policy success from this
+short test; a random scratch actor is expected to fail initially.
+
+Only after reviewing probe/smoke results, explicitly start longer scratch training:
 
 ```bash
-python legged_gym/legged_gym/scripts/pickup_stand.py --mode collect --stage hold --reset-suite pickup --steps 3000 --num_envs 4096 --headless --seed 1 --finetune_path HOLD_CHECKPOINT --output outputs/pickup_stand/validated.json
-python legged_gym/legged_gym/scripts/pickup_stand.py --mode train --stage hold --hold-bank outputs/pickup_stand/validated.pt --require-hold-bank --num_envs 4096 --headless --seed 1 --max_iterations 2000 --finetune_path HOLD_CHECKPOINT
-python legged_gym/legged_gym/scripts/pickup_stand.py --mode train --stage pickup --hold-bank outputs/pickup_stand/validated.pt --require-hold-bank --num_envs 4096 --headless --seed 1 --max_iterations 3000 --finetune_path HOLD_CHECKPOINT
-python legged_gym/legged_gym/scripts/pickup_stand.py --mode train --stage full --hold-bank outputs/pickup_stand/validated.pt --require-hold-bank --num_envs 4096 --headless --seed 1 --max_iterations 5000 --finetune_path PICKUP_CHECKPOINT
-python legged_gym/legged_gym/scripts/pickup_stand.py --mode evaluate --stage full --steps 3000 --num_envs 256 --headless --seed 1 --reset-suite approach --finetune_path FULL_CHECKPOINT --baseline-metrics outputs/pickup_stand/baseline.json --output outputs/pickup_stand/full_eval.json
+python legged_gym/legged_gym/scripts/pickup_stand.py --mode train --num_envs 4096 --headless --seed 1 --approach-speed 0.85 --hold-seconds 3 --reset-weights 0 .2 .2 .2 .4 --max_iterations 20000 --output outputs/pickup_stand/scratch_train.json
 ```
 
-Also evaluate `--reset-suite pickup` and `--reset-suite hold --hold-bank PATH`
-against their own matched baselines. Promote hold→pickup after reliable ≥3 s
-holds and pickup→full after pickup success stays within 5 percentage points of its
-baseline while hold succeeds. These are suggested evaluation gates, not claims
-about the untrained implementation. Each finetune strictly loads Actor/Critic and
-AMP, starts a fresh optimizer and resets iteration to zero. No teacher,
-distillation or locomotion specialist is involved.
+Logs/checkpoints go to `legged_gym/logs/carrybox_pickup_stand_scratch/`. Replace
+`SCRATCH_CHECKPOINT` with an actual saved phase-v2 checkpoint for evaluation:
 
-Reports contain pickup and approach success, completion-to-stability delay,
-continuous hold duration, base/box linear/angular speeds, bilateral contact,
-height/orientation deviations, two-foot contact and slip. Full per-episode data,
-reset-category breakdown and censored partial episodes are saved. Baseline
-comparisons require matching seed, env count, horizon and reset suite; deltas
-include approach/pickup quality and hold success.
+```bash
+python legged_gym/legged_gym/scripts/pickup_stand.py --mode evaluate --checkpoint SCRATCH_CHECKPOINT --reset-suite approach --steps 3000 --num_envs 256 --headless --seed 1 --output outputs/pickup_stand/approach_eval.json
+python legged_gym/legged_gym/scripts/pickup_stand.py --mode evaluate --checkpoint SCRATCH_CHECKPOINT --reset-suite pickup --steps 3000 --num_envs 256 --headless --seed 1 --output outputs/pickup_stand/pickup_eval.json
+```
 
-## Validation and remaining work
+Reports include per-predicate PICKUP failure counts, per-phase predicate pass
+rates/numeric values, pitch/roll forces, base/box linear/angular speeds, contact,
+height/orientation error, support-body slip, footstep counts, hold duration and
+success, approach/pickup quality, reset-category statistics and censored episodes.
+`--baseline-metrics PATH` compares matched phase-v2 evaluations only. HOLD-bank
+resets are excluded from pickup-success and completion-to-stability denominators.
 
-CPU audit, strict checkpoint loading, and **31 tensor/runtime-harness tests pass**.
-The first-reset regression specifically constructs contact buffers before any
-physics step; `contact_filt` is preallocated by this task because the parent
-creates it only during post_physics_step. The earlier test fixture already had
-that buffer and therefore did not catch the constructor-order omission.
-Tests exercise the production MotionLib, stage sampler, environment methods and
-actual HIMPPO optimization with legacy, mixed, and all-HOLD batches. The Gym
-boundary is replaced by a harness; these tests do not establish physical stability.
-The local Windows interpreter has CPU PyTorch 2.6 and no Isaac Gym. Consequently
-GPU integration smoke, pickup success, hold duration and regression metrics are
-**not measured**, and no expensive training was started. The numerical transition
-and reward tolerances still need physical validation on the original Isaac Gym
-stack. Box orientations are heading-derived, not independently measured in the
-reference files; the saved HOLD bank must come from actual simulated motion.
+Optional bank collection after scratch training:
 
-The existing carry-preservation suite was also checked: 17 of 18 tests passed;
-one evaluator-history test cannot import `isaacgym`. Compilation and
-`git diff --check` pass. The local interpreter lacks pytest, so the test run loaded
-the installed pure-Python pytest from `D:/Anaconda3/Lib/site-packages` after
-initializing the local PyTorch optimizer; no packages or global environments were
-modified. Standard `python -m pytest` applies in an environment with pytest installed.
+```bash
+python legged_gym/legged_gym/scripts/pickup_stand.py --mode collect --checkpoint SCRATCH_CHECKPOINT --reset-suite pickup --steps 3000 --num_envs 256 --headless --seed 1 --output outputs/pickup_stand/validated.json
+```
 
-## Exact files changed
+This writes `validated.pt` only if real simulated stable states exist. To use it,
+explicitly set `--hold-bank PATH --reset-weights .1 .2 .2 .2 .3`; all sampled box
+sizes/masses need matching bank coverage. Bank-based resets do not load policy
+parameters. Pure scratch training needs no bank.
 
-New:
+Independent old-policy comparison uses its **original task/command semantics**:
+
+```bash
+python legged_gym/legged_gym/scripts/play.py --task carrybox --resume --resume_path shared_artifacts/2026-10-19/carry_track/model_33999.pt --num_envs 16 --headless
+```
+
+That legacy play run uses the existing carrybox command behavior; its rewards are
+not interchangeable with the new phase-task rewards. It never initializes scratch
+training. Legacy checkpoint shape auditing remains available separately with
+`audit.py --checkpoint PATH --output outputs/pickup_stand/legacy_audit.json`.
+
+## Validation and unresolved issues
+
+* CPU tests: **52 passed**, including original-reward numerical comparison,
+  collision-mesh/index audit, every predicate, reset distributions, phase semantics,
+  command disabling, AMP filtering/mixing and checkpoint guards.
+* A two-iteration CPU training smoke runs the actual HIMOnPolicyRunner/HIMPPO and
+  full 738D Actor, 126D Critic and 600D discriminator with a synthetic VecEnv.
+  `torch.load` is forbidden during that test; all three networks update from
+  random weights and Adam starts empty. Finite losses/parameters and new checkpoint
+  metadata round-trip are checked. This does **not** execute PhysX.
+* Syntax compilation and `git diff --check` pass. Existing CarryBox/Locomotion
+  environment/config files, URDF and old checkpoint are unchanged.
+* Isaac Gym contact probe was attempted locally and stopped at import with
+  `ModuleNotFoundError: isaacgym`. The current Windows host has CPU PyTorch 2.6;
+  no Ubuntu SSH connection was supplied. **Gym contact validation and Gym training
+  smoke remain unrun**; run the commands above on Ubuntu before long training.
+* Thresholds remain physically motivated but need simulator evidence, especially
+  per-foot force noise and palm geometry tolerance. Moving reference tails cannot
+  establish a static HOLD initial state. Current reference box orientation is
+  heading-derived; root angular derivatives use MotionLib's original approximation.
+  Reset gyro seeds root twist; Gym refreshes the actual torso twist on the first step.
+
+No long training was started and no trained success rate is claimed. See
+`validation.json` for the explicit run/blocked status.
+
+## Exact files changed in this revision
+
+Modified:
 
 * `legged_gym/legged_gym/envs/g1/carrybox_pickup_stand.py`
 * `legged_gym/legged_gym/envs/g1/carrybox_pickup_stand_config.py`
 * `legged_gym/legged_gym/envs/g1/pickup_stand_logic.py`
-* `legged_gym/legged_gym/envs/motionlib/pickup_stand_sampling.py`
-* `legged_gym/resources/config/carrybox_pickup_stand.yaml`
 * `legged_gym/legged_gym/scripts/pickup_stand.py`
+* `legged_gym/legged_gym/utils/task_registry.py` — opt-in scratch load guard
+* `rsl_rl/rsl_rl/runners/him_on_policy_runner.py` — optional new-task save metadata
+* `rsl_rl/rsl_rl/algorithms/him_ppo.py` — opt-in set_to_none gradients so HOLD
+  batches do not move an inactive discriminator via old Adam momentum/weight decay
 * `experiments/pickup_stand/audit.py`
 * `experiments/pickup_stand/audit.json`
 * `experiments/pickup_stand/tests/test_pickup_stand.py`
 * `experiments/pickup_stand/README.md`
 
-Modified (registration and optional stage metadata/reward path only):
+New:
 
-* `legged_gym/legged_gym/envs/__init__.py`
-* `rsl_rl/rsl_rl/storage/him_rollout_storage.py`
-* `rsl_rl/rsl_rl/algorithms/him_ppo.py`
-* `rsl_rl/rsl_rl/modules/amp.py`
-* `rsl_rl/rsl_rl/runners/him_on_policy_runner.py`
+* `legged_gym/legged_gym/utils/pickup_stand_experiment.py`
+* `experiments/pickup_stand/validation.json`

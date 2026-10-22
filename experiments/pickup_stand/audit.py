@@ -5,8 +5,59 @@ import json
 from pathlib import Path
 import torch
 import yaml
+import ast
+import subprocess
+import struct
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
+PHYSHSI_COMMIT = '07bf22bdaf9c23c1d40366334a744c1816b6d42b'
+
+
+def inspect_original_physhsi():
+    paths = ['legged_gym/legged_gym/envs/g1/carrybox.py',
+             'legged_gym/legged_gym/envs/g1/carrybox_config.py',
+             'rsl_rl/rsl_rl/runners/him_on_policy_runner.py']
+    source = {p: subprocess.check_output(['git', 'show', PHYSHSI_COMMIT + ':' + p], cwd=ROOT, text=True) for p in paths}
+    tree = ast.parse(source[paths[0]])
+    methods = {n.name: ast.get_source_segment(source[paths[0]], n)
+               for cls in tree.body if isinstance(cls, ast.ClassDef)
+               for n in cls.body if isinstance(n, ast.FunctionDef)}
+    assert 'target_speed_loco' in methods['_reward_walk_task']
+    assert 'torch.bernoulli' in methods['_reset_hybrid_state_init']
+    cfg = ast.parse(source[paths[1]])
+    target = next(n.value.value for n in ast.walk(cfg) if isinstance(n, ast.Assign)
+                  and any(isinstance(t, ast.Name) and t.id == 'target_speed_loco' for t in n.targets))
+    return dict(repository='InternRobotics/PhysHSI', commit=PHYSHSI_COMMIT,
+        target_speed_loco=target, hybrid_rsi=True, amp_features=600, amp_coefficient=.25,
+        sources={p: subprocess.check_output(['git', 'rev-parse', PHYSHSI_COMMIT + ':' + p], cwd=ROOT, text=True).strip() for p in paths},
+        adapted=['fixed-speed world-frame approach/facing', 'hand placement and box lifting', 'AMP + hybrid RSI'],
+        excluded=['relocation', 'putDown', 'carryWith'],
+        walk_task=methods['_reward_walk_task'], carryup_task=methods['_reward_carryup_task'])
+
+
+def inspect_foot_geometry():
+    urdf = ROOT / 'legged_gym/resources/robots/g1/urdf/g1_29dof.urdf'
+    links = {l.get('name'): l for l in ET.parse(urdf).findall('link')}
+    report = {}
+    for side in ('left', 'right'):
+        for part in ('pitch', 'roll'):
+            name = f'{side}_ankle_{part}_link'
+            meshes = []
+            for mesh in links[name].findall('collision/geometry/mesh'):
+                path = (urdf.parent / mesh.get('filename')).resolve()
+                raw = path.read_bytes()
+                count = struct.unpack_from('<I', raw, 80)[0]
+                if len(raw) != 84 + count * 50:
+                    raise ValueError(f'Expected binary STL for geometry audit: {path}')
+                vertices = [struct.unpack_from('<9f', raw, 84 + i * 50 + 12) for i in range(count)]
+                points = torch.tensor(vertices).reshape(-1, 3)
+                meshes.append(dict(file=path.relative_to(ROOT).as_posix(), triangles=count,
+                    bounds_min=points.amin(0).tolist(), bounds_max=points.amax(0).tolist()))
+            report[name] = meshes
+    return dict(collision_meshes=report, selected_support_links=['left_ankle_roll_link', 'right_ankle_roll_link'],
+        previous_detection_links=['left_ankle_pitch_link', 'right_ankle_pitch_link'],
+        preserve_amp_end_effector_links=True, isaac_gym_runtime_verified=False)
 
 
 def load_source(name, path):
@@ -105,6 +156,8 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, default=ROOT / 'experiments/pickup_stand/audit.json')
     args = parser.parse_args()
     result = inspect_references()
+    result['original_physhsi'] = inspect_original_physhsi()
+    result['foot_geometry'] = inspect_foot_geometry()
     if args.checkpoint:
         result['checkpoint'] = inspect_checkpoint(args.checkpoint)
     args.output.parent.mkdir(parents=True, exist_ok=True)

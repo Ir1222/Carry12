@@ -1,11 +1,12 @@
 """G1 approaches, picks up and immediately holds. No loaded locomotion phase."""
-import warnings
 import torch
+from isaacgym import gymapi
 from isaacgym.torch_utils import quat_rotate_inverse
 
 from .carrybox import LeggedRobot as CarryBox
 from .pickup_stand_logic import (APPROACH, PICKUP, HOLD, advance_phase,
-                                  completion_conditions, palm_box_contact, ResetKinematics)
+                                  completion_predicates, palm_box_contact, ResetKinematics,
+                                  validate_reset_weights, per_foot_support)
 from ..motionlib.pickup_stand_sampling import PickupStandMotionSampler
 
 
@@ -15,6 +16,7 @@ class LeggedRobot(CarryBox):
         # reset() runs before the first physics step for loaded RSI. The parent
         # otherwise creates this buffer only inside post_physics_step().
         self.contact_filt = torch.zeros_like(self.last_contacts)
+        self._init_support_buffers()
         self.motionlib = PickupStandMotionSampler(self.motionlib)
         from legged_gym import LEGGED_GYM_ROOT_DIR
         self.reset_kinematics = ResetKinematics(self.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR), self.dof_names)
@@ -22,7 +24,7 @@ class LeggedRobot(CarryBox):
         self.reset_category = torch.zeros_like(self.phase)
         self.phase_age = torch.zeros_like(self.phase)
         self.pending_observation_reset = torch.zeros_like(self.phase, dtype=torch.bool)
-        for name in ('contact_seconds', 'completion_seconds', 'hold_elapsed',
+        for name in ('approach_ready_seconds', 'completion_seconds', 'hold_elapsed',
                      'stable_elapsed', 'longest_hold', 'hold_failure_seconds',
                      'completion_at', 'stable_delay', 'approach_elapsed', 'pickup_elapsed'):
             setattr(self, name, torch.zeros(self.num_envs, device=self.device))
@@ -36,16 +38,45 @@ class LeggedRobot(CarryBox):
         self.stable_delay.fill_(-1.)
         self.hold_bank = None
         path = self.cfg.pickup_stand.hold_bank_path
+        validate_reset_weights(self.cfg.pickup_stand.reset_weights, path is not None)
         if path:
             self.hold_bank = torch.load(path, map_location=self.device, weights_only=False)
             self._validate_bank()
-        elif self.cfg.pickup_stand.require_hold_bank:
-            raise ValueError('Validated HOLD bank required; collect one with pickup_stand.py --mode collect')
-        else:
-            warnings.warn('No validated HOLD bank: HOLD reset weight goes to late pickup; no reference frame is labeled static HOLD.')
         expected = list(self.cfg.init_state.default_joint_angles)
         if self.dof_names != expected or self.num_obs != 738 or self.num_actions != 29:
             raise ValueError('Full AMP interface/joint order mismatch')
+        self.policy_metadata = dict(task='carrybox_pickup_stand',
+            observation_semantics=self.cfg.observation_semantics, actor_obs=738,
+            critic_obs=126, actions=29, dof_names=self.dof_names,
+            initialization='scratch', approach_speed=self.cfg.rewards.target_speed_loco)
+
+    def _init_support_buffers(self):
+        """Tensor rows are DOMAIN_ENV: platform, target platform, box, robot."""
+        names = self.gym.get_actor_rigid_body_names(self.envs[0], self.actor_handles[0])
+        offset = self.rigid_body_states.shape[1] - len(names)
+        if offset != 3:
+            raise ValueError('Unexpected actor/body tensor layout')
+        def resolve(name):
+            index = self.gym.find_actor_rigid_body_index(self.envs[0], self.actor_handles[0], name, gymapi.DOMAIN_ENV)
+            if name not in names or index != offset + names.index(name):
+                raise ValueError(f'Invalid DOMAIN_ENV body index for {name}: {index}')
+            return index
+        support = self.cfg.pickup_stand.support_body_names
+        self.support_indices = torch.tensor([resolve(name) for name in support], device=self.device)
+        pitch = ['left_ankle_pitch_link', 'right_ankle_pitch_link']
+        self.pitch_contact_indices = torch.tensor([resolve(name) for name in pitch], device=self.device)
+        self.support_manifest = dict(domain='DOMAIN_ENV', robot_offset=offset,
+            support_names=support, support_indices=self.support_indices.cpu().tolist(),
+            pitch_indices=self.pitch_contact_indices.cpu().tolist(),
+            amp_foot_indices=self.feet_indices.cpu().tolist())
+        self.previous_support = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self.device)
+        self.footstep_events = torch.zeros(self.num_envs, device=self.device)
+
+    def _foot_support(self):
+        return per_foot_support(self.contact_forces, self.support_indices, self.cfg.pickup_stand.foot_force)
+
+    def _support_velocities(self):
+        return self.rigid_body_states[:, self.support_indices, 7:10]
 
     def reset(self):
         # BaseTask.reset advances physics with a zero action, which can wrench
@@ -68,8 +99,10 @@ class LeggedRobot(CarryBox):
 
     def _validate_bank(self):
         bank, cfg = self.hold_bank, self.cfg.pickup_stand
-        if bank.get('dof_names') != self.dof_names or bank.get('version') != 1:
+        if bank.get('dof_names') != self.dof_names or bank.get('version') != 2:
             raise ValueError('HOLD bank joint ordering/version mismatch')
+        if bank.get('support_manifest', {}).get('support_names') != self.cfg.pickup_stand.support_body_names:
+            raise ValueError('HOLD bank must validate the actual shoe collision bodies')
         count = len(bank['root'])
         for key, width in [('root', 13), ('box', 13), ('dof_pos', 29), ('dof_vel', 29), ('size', 3), ('ee', 15)]:
             if bank[key].shape != (count, width) or not torch.isfinite(bank[key]).all():
@@ -106,7 +139,7 @@ class LeggedRobot(CarryBox):
 
     def _physical_status(self):
         cfg = self.cfg.pickup_stand
-        feet_down = (self.contact_forces[:, self.feet_indices, 2] > cfg.foot_force).all(-1)
+        feet_down = self._foot_support()[0].all(-1)
         bilateral = self._bilateral_contact()
         base_height = self.root_states[:, 2] - self.env_origins[:, 2]
         box_height = self.box_states[:, 2] - self.env_origins[:, 2]
@@ -116,35 +149,65 @@ class LeggedRobot(CarryBox):
         bottom = self.box_states[:, 2] - self._box_size[:, 2] / 2
         support_top = torch.maximum(self.env_origins[:, 2], self.platform_pos[:, 2] + self._platform_height / 2)
         relative = (self.box_states[:, 7:10] - self.root_states[:, 7:10]).norm(dim=-1)
-        complete = completion_conditions(base_height, base_tilt, box_height, box_tilt,
+        self.completion_values = dict(base_height=base_height, base_tilt=base_tilt,
+            box_height=box_height, box_tilt=box_tilt, clearance=bottom - support_top,
+            relative_speed=relative, base_vertical_speed=self.root_states[:, 9],
+            box_vertical_speed=self.box_states[:, 9])
+        self.completion_checks = completion_predicates(base_height, base_tilt, box_height, box_tilt,
             bottom - support_top, bilateral, feet_down, relative,
             self.root_states[:, 9], self.box_states[:, 9], cfg)
+        complete = torch.stack(list(self.completion_checks.values()), -1).all(-1)
         return complete, bilateral, feet_down
 
     def _compute_carry_velocity_active(self):
         # The parent calls this before our phase update; no dynamic carry gate.
-        return self.phase == HOLD
+        return torch.zeros_like(self.phase, dtype=torch.bool)
+
+    def _clear_velocity_commands(self, env_ids=None):
+        if env_ids is None:
+            self.commands.zero_()
+            self.carry_policy_commands.zero_()
+        else:
+            self.commands[env_ids] = 0.
+            self.carry_policy_commands[env_ids] = 0.
+
+    def _resample_commands(self, env_ids):
+        self._clear_velocity_commands(env_ids)
+
+    _sample_episode_vx_commands = _resample_commands
+    _resample_carry_yaw_commands = _resample_commands
+
+    def _sample_carry_yaw_resample_time(self, env_ids):
+        self.carry_yaw_resample_time[env_ids] = 0.
+
+    def update_command_curriculum(self, env_ids):
+        self._clear_velocity_commands(env_ids)
+
+    def _facing_error(self):
+        target = torch.atan2(self.robot2object_dir[:, 1], self.robot2object_dir[:, 0])
+        error = target - self.yaw
+        return torch.atan2(torch.sin(error), torch.cos(error)).abs()
 
     def _update_carry_heading_commands(self):
         old = self.phase.clone()
         complete, bilateral, _ = self._physical_status()
         cfg = self.cfg.pickup_stand
-        self.phase, self.contact_seconds, self.completion_seconds, entered = advance_phase(
-            self.phase, self.contact_seconds, self.completion_seconds,
-            self.robot2object_dist < self.cfg.rewards.thresh_robot2object,
-            bilateral, complete, self.dt, cfg.contact_seconds, cfg.completion_seconds)
+        ready = (self.robot2object_dist < self.cfg.rewards.thresh_robot2object) & (self._facing_error() <= cfg.pickup_facing_tolerance)
+        self.phase, self.approach_ready_seconds, self.completion_seconds, entered = advance_phase(
+            self.phase, self.approach_ready_seconds, self.completion_seconds,
+            ready, complete, self.dt, cfg.approach_seconds, cfg.completion_seconds)
         self.phase_age = torch.where(old == self.phase, self.phase_age + 1, 0)
         self.pickup_completed |= entered
         self.completion_at[entered] = self.episode_length_buf[entered] * self.dt
         self.hold_box_height[entered] = self.box_states[entered, 2] - self.env_origins[entered, 2]
         self.hold_box_quat[entered] = self.box_states[entered, 3:7]
-        # Remove movement commands upon grasping, BEFORE lift completion. The
-        # inherited approach reward uses the original speed only while APPROACH.
-        self.commands[self.phase != APPROACH] = 0.
-        self.carry_policy_commands[:] = self.commands
+        self._clear_velocity_commands()
         self.carry_heading_error.zero_()
-        self.carry_velocity_active = self.phase == HOLD
-        self.carry_tracking_started = self.phase == HOLD
+        self.carry_velocity_active.zero_()
+        self.carry_tracking_started.zero_()
+        support = self._foot_support()[0]
+        self.footstep_events += ((self.phase == HOLD)[:, None] & ~support & self.previous_support).sum(-1)
+        self.previous_support[:] = support
         self.approach_elapsed += (self.phase == APPROACH) * self.dt
         self.pickup_elapsed += (self.phase == PICKUP) * self.dt
         self.hold_elapsed += (self.phase == HOLD) * self.dt
@@ -153,18 +216,20 @@ class LeggedRobot(CarryBox):
         stable &= self.root_states[:, 10:13].norm(dim=-1) <= cfg.stable_base_angular_speed
         stable &= self.box_states[:, 7:10].norm(dim=-1) <= cfg.stable_box_speed
         stable &= self.box_states[:, 10:13].norm(dim=-1) <= cfg.stable_box_angular_speed
-        stable &= self.feet_vel.norm(dim=-1).amax(-1) <= cfg.stable_foot_speed
+        stable &= self._support_velocities().norm(dim=-1).amax(-1) <= cfg.stable_foot_speed
         self.stable_elapsed = torch.where(stable, self.stable_elapsed + self.dt, 0.)
         self.longest_hold = torch.maximum(self.longest_hold, self.stable_elapsed)
         first_stable = (self.stable_elapsed >= cfg.stable_seconds) & (self.stable_delay < 0)
         self.stable_delay[first_stable] = self.hold_elapsed[first_stable] - cfg.stable_seconds
-        self.hold_success |= self.stable_elapsed >= cfg.success_hold_seconds
+        self.hold_success |= self.stable_elapsed >= max(cfg.success_hold_seconds, cfg.stable_seconds)
         self.hold_failure_seconds = torch.where((self.phase == HOLD) & ~complete,
                                                  self.hold_failure_seconds + self.dt, 0.)
 
     def check_termination(self):
         super().check_termination()
         self.reset_buf |= self.hold_failure_seconds > self.cfg.pickup_stand.failure_grace_seconds
+        if self.cfg.pickup_stand.terminate_on_success:
+            self.reset_buf |= self.hold_success
 
     def compute_amp_observations(self):
         result = super().compute_amp_observations()
@@ -175,7 +240,47 @@ class LeggedRobot(CarryBox):
         return result
 
     def _reward_walk_task(self):
-        return super()._reward_walk_task() * (self.phase == APPROACH)
+        # Original PhysHSI world-frame box-direction speed + facing objective.
+        direction = torch.nn.functional.normalize(self.robot2object_dir, dim=-1)
+        speed = (direction * self.rigid_body_states[:, self.upper_body_index, 7:9]).sum(-1)
+        velocity = torch.exp(-5 * (self.cfg.rewards.target_speed_loco - speed).square())
+        near = self.robot2object_dist < self.cfg.rewards.thresh_robot2object
+        velocity = torch.where(near, 1., velocity)
+        position = torch.where(near, 1., torch.exp(-.5 * self.robot2object_dist))
+        facing = torch.exp(-.75 * self._facing_error())
+        cfg = self.cfg.rewards
+        return (self.phase == APPROACH) * (cfg.robot2object_pos * position + cfg.robot2object_vel * velocity + cfg.start_heading * facing)
+
+    def _reward_carryup_task(self):
+        return (self.phase != APPROACH) * super()._reward_carryup_task()
+
+    def _reward_pickup_grasp(self):
+        return (self.phase == PICKUP) * self._bilateral_contact().float()
+
+    def _lift_progress(self):
+        bottom = self.box_states[:, 2] - self._box_size[:, 2] / 2
+        top = torch.maximum(self.env_origins[:, 2], self.platform_pos[:, 2] + self._platform_height / 2)
+        return ((bottom - top) / self.cfg.pickup_stand.min_clearance).clamp(0., 1.)
+
+    def _standing_posture(self):
+        height = self.root_states[:, 2] - self.env_origins[:, 2]
+        excess = (self.cfg.pickup_stand.min_base_height - height).clamp_min(0) + (height - .88).clamp_min(0)
+        leg_error = (self.dof_pos[:, :12] - self.default_dof_pos[:, :12]).square().mean(-1)
+        return torch.exp(-excess.square() / .01 - self.projected_gravity[:, :2].square().sum(-1) / .09 - .3 * leg_error)
+
+    def _reward_pickup_standup(self):
+        return (self.phase == PICKUP) * self._lift_progress() * self._standing_posture()
+
+    def _reward_loaded_balance(self):
+        # Continuous feedback before the hard completion gate (including a foot
+        # or posture predicate still failing); never demands moving-carry motion.
+        base = torch.exp(-self.root_states[:, 7:10].square().sum(-1) / .02 - self.root_states[:, 10:13].square().sum(-1) / .08)
+        box = torch.exp(-self.box_states[:, 7:10].square().sum(-1) / .02 - self.box_states[:, 10:13].square().sum(-1) / .08)
+        support = self._foot_support()[1].clamp_min(0) / self.cfg.pickup_stand.foot_force
+        feet = support.clamp_max(1).mean(-1) * torch.exp(-self._support_velocities().square().sum((1, 2)) / .02)
+        box_level = torch.exp(-self.projected_gravity_box[:, :2].square().sum(-1) / .09)
+        gate = (self.phase == PICKUP) * self._lift_progress() * self._bilateral_contact().float()
+        return gate * (.2 * base + .2 * box + .25 * self._standing_posture() + .2 * feet + .15 * box_level)
 
     def _reward_hold_base_still(self):
         return (self.phase == HOLD) * torch.exp(-self.root_states[:, 7:9].square().sum(-1) / 0.02
@@ -194,35 +299,45 @@ class LeggedRobot(CarryBox):
         return (self.phase == HOLD) * torch.exp(-height_error.square() / 0.01 - angle.square() / 0.09)
 
     def _reward_hold_posture(self):
-        # Wide height dead zone, upright torso, soft leg posture. Arms remain free
-        # to support randomized box masses/sizes; no zero-joint-velocity target.
-        height = self.root_states[:, 2] - self.env_origins[:, 2]
-        excess = (0.70 - height).clamp_min(0) + (height - 0.88).clamp_min(0)
-        leg_error = (self.dof_pos[:, :12] - self.default_dof_pos[:, :12]).square().mean(-1)
-        return (self.phase == HOLD) * torch.exp(-excess.square() / 0.01
-            - self.projected_gravity[:, :2].square().sum(-1) / 0.09 - 0.3 * leg_error)
+        return (self.phase == HOLD) * self._standing_posture()
 
     def _reward_hold_feet(self):
-        down = (self.contact_forces[:, self.feet_indices, 2] > self.cfg.pickup_stand.foot_force).all(-1)
-        return (self.phase == HOLD) * down * torch.exp(-self.feet_vel.square().sum((1, 2)) / 0.02)
+        down = self._foot_support()[0].all(-1)
+        return (self.phase == HOLD) * down * torch.exp(-self._support_velocities().square().sum((1, 2)) / .02)
 
     def _reward_hold_action_rate(self):
         return (self.phase == HOLD) * super()._reward_action_rate()
 
+    def _reward_hold_footsteps(self):
+        support = self._foot_support()[0]
+        # Both lost support and unnecessary foot motion cost reward; no action
+        # freezing or rejection of small physical recovery adjustments.
+        return (self.phase == HOLD) * ((~support).float().sum(-1) + self._support_velocities().square().sum((1, 2)))
+
+    def _reward_task_success(self):
+        # _prepare_reward_function multiplies scales by dt. Undo that here so
+        # the configured success scale is a terminal bonus, not a rate.
+        return self.hold_success.float() / self.dt
+
     def _reset_actors(self, env_ids):
         cfg = self.cfg.pickup_stand
-        weights = torch.tensor(getattr(cfg, cfg.curriculum_stage + '_reset_weights'), dtype=torch.float, device=self.device)
-        if self.hold_bank is None:
-            weights[3] += weights[0]
-            weights[0] = 0
+        weights = validate_reset_weights(cfg.reset_weights, self.hold_bank is not None).to(self.device)
         categories = torch.multinomial(weights, len(env_ids), replacement=True)
         self.reset_category[env_ids] = categories
         self.phase[env_ids] = APPROACH
-        # Full approach always starts unloaded, using the inherited default reset.
+        # PhysHSI-style hybrid coverage: unloaded default + loco RSI approaches,
+        # with pickup RSI stratified separately. Every category is explicit.
         approach_ids = env_ids[categories == 4]
         if len(approach_ids):
-            self._reset_default(approach_ids)
-            self.reset_ee[approach_ids] = 0.
+            use_rsi = torch.rand(len(approach_ids), device=self.device) < cfg.approach_rsi_probability
+            default = approach_ids[~use_rsi]
+            if len(default):
+                self._reset_default(default)
+            reference = approach_ids[use_rsi]
+            if len(reference):
+                motions = self.motionlib.sample_motions('loco', len(reference))
+                times = self.motionlib.sample_time_rsi('loco', motions)
+                self._set_reference_reset(reference, 'loco', motions, times)
         for category in (1, 2, 3):
             ids = env_ids[categories == category]
             if not len(ids):
@@ -234,25 +349,11 @@ class LeggedRobot(CarryBox):
             lower = [None, torch.zeros_like(contact), contact, contact + .5 * (end - contact)][category]
             upper = [None, contact, contact + .5 * (end - contact), end][category]
             times = lower + torch.rand(len(ids), device=self.device) * (upper - lower)
-            root, quat, linear, angular, joints, velocity, ee = self.motionlib.get_motion_state('pickUp', motions, times)
-            # Include the reference height correction in root Z velocity.
-            t0, t1 = (times - .5).clamp_min(0), torch.minimum(times + .5, end)
-            p0 = self.motionlib.get_motion_state('pickUp', motions, t0)[0]
-            p1 = self.motionlib.get_motion_state('pickUp', motions, t1)[0]
-            linear[:, 2] = (p1[:, 2] - p0[:, 2]) * self.motionlib.fps / (t1 - t0).clamp_min(1.e-6)
-            self.root_states[ids, :3] = root + self.env_origins[ids]
-            self.root_states[ids, 3:7] = quat
-            self.root_states[ids, 7:10] = linear
-            self.root_states[ids, 10:13] = angular
-            self.dof_pos[ids], self.dof_vel[ids], self.reset_ee[ids] = joints, velocity, ee
-            # Parent reset-box helper consumes these exact same motion/time IDs.
-            self._reset_ref_env_ids.setdefault('pickUp', []).append(ids)
-            self._reset_ref_motion_ids.setdefault('pickUp', []).append(motions)
-            self._reset_ref_motion_times.setdefault('pickUp', []).append(times)
-            self.phase[ids] = torch.where(times >= contact, PICKUP, APPROACH)
+            self._set_reference_reset(ids, 'pickUp', motions, times)
+            self.phase[ids] = PICKUP  # reaching/grasping is part of pickup AMP
         for mapping in (self._reset_ref_env_ids, self._reset_ref_motion_ids, self._reset_ref_motion_times):
-            if 'pickUp' in mapping:
-                mapping['pickUp'] = torch.cat(mapping['pickUp'])
+            for skill in mapping:
+                mapping[skill] = torch.cat(mapping[skill])
         self._bank_reset_ids = env_ids[categories == 0]
         if len(self._bank_reset_ids):
             bank = self.hold_bank
@@ -267,6 +368,21 @@ class LeggedRobot(CarryBox):
             self.dof_pos[ids], self.dof_vel[ids] = bank['dof_pos'][rows], bank['dof_vel'][rows]
             self.reset_ee[ids] = bank['ee'][rows]
             self.phase[ids] = HOLD
+
+    def _set_reference_reset(self, ids, skill, motions, times):
+        root, quat, linear, angular, joints, velocity, ee = self.motionlib.get_motion_state(skill, motions, times)
+        end = self.motionlib.motion_len[skill][motions].float() - 1
+        t0, t1 = (times - .5).clamp_min(0), torch.minimum(times + .5, end)
+        p0 = self.motionlib.get_motion_state(skill, motions, t0)[0]
+        p1 = self.motionlib.get_motion_state(skill, motions, t1)[0]
+        linear[:, 2] = (p1[:, 2] - p0[:, 2]) * self.motionlib.fps / (t1 - t0).clamp_min(1.e-6)
+        self.root_states[ids, :3] = root + self.env_origins[ids]
+        self.root_states[ids, 3:7] = quat
+        self.root_states[ids, 7:10] = linear
+        self.root_states[ids, 10:13] = angular
+        self.dof_pos[ids], self.dof_vel[ids], self.reset_ee[ids] = joints, velocity, ee
+        for mapping, value in [(self._reset_ref_env_ids, ids), (self._reset_ref_motion_ids, motions), (self._reset_ref_motion_times, times)]:
+            mapping.setdefault(skill, []).append(value)
 
     def _reset_boxes(self, env_ids):
         super()._reset_boxes(env_ids)
@@ -285,12 +401,8 @@ class LeggedRobot(CarryBox):
             self.has_seen_tag[ids] = False
 
     def _reset_task(self, env_ids):
-        super()._reset_task(env_ids)
-        self.commands[env_ids] = 0.
-        ids = env_ids[self.phase[env_ids] == APPROACH]
-        lo, hi = self.cfg.commands.approach_vx_range
-        self.commands[ids, 0] = lo + torch.rand(len(ids), device=self.device) * (hi - lo)
-        self.carry_policy_commands[env_ids] = self.commands[env_ids]
+        self.tar_platform_states[env_ids] = self.tar_platform_default_states[env_ids]
+        self._clear_velocity_commands(env_ids)
 
     def reset_idx(self, env_ids):
         if not len(env_ids):
@@ -300,7 +412,7 @@ class LeggedRobot(CarryBox):
         super().reset_idx(env_ids)
         self.reset_ee[env_ids], self.reset_torso_inverse[env_ids] = self.reset_kinematics.end_effectors(self.dof_pos[env_ids], return_torso=True)
         self.extras['episode'].update(stats)
-        for name in ('contact_seconds', 'completion_seconds', 'hold_elapsed', 'stable_elapsed',
+        for name in ('approach_ready_seconds', 'completion_seconds', 'hold_elapsed', 'stable_elapsed',
                      'longest_hold', 'hold_failure_seconds', 'completion_at', 'approach_elapsed', 'pickup_elapsed'):
             getattr(self, name)[env_ids] = 0.
         self.stable_delay[env_ids] = -1.
@@ -312,9 +424,18 @@ class LeggedRobot(CarryBox):
         self.obs_buf[env_ids] = 0.
         self.last_contacts[env_ids] = False
         self.contact_filt[env_ids] = False
+        self.previous_support[env_ids] = False
+        self.footstep_events[env_ids] = 0.
         hold = env_ids[self.phase[env_ids] == HOLD]
         self.hold_box_height[hold] = self.box_states[hold, 2] - self.env_origins[hold, 2]
         self.hold_box_quat[hold] = self.box_states[hold, 3:7]
+
+    def compute_task_observations(self):
+        actor, critic = super().compute_task_observations()
+        phase = torch.nn.functional.one_hot(self.phase, 3).to(actor.dtype)
+        actor[:, -3:] = phase
+        critic[:, -3:] = phase
+        return actor, critic
 
     def compute_observations(self):
         super().compute_observations()
@@ -338,7 +459,8 @@ class LeggedRobot(CarryBox):
             (self.dof_pos[ids] - self.default_dof_pos) * self.obs_scales.dof_pos,
             self.dof_vel[ids] * self.obs_scales.dof_vel, self.reset_ee[ids],
             torch.zeros(len(ids), 29, device=self.device)), -1)
-        task = torch.cat((box_local, box_rot, self._box_size[ids], self.carry_policy_commands[ids, :3]), -1)
+        phase = torch.nn.functional.one_hot(self.phase[ids], 3).to(proprio.dtype)
+        task = torch.cat((box_local, box_rot, self._box_size[ids], phase), -1)
         self.obs_buf[ids] = torch.cat((proprio, task), -1).repeat(1, self.actor_history_length)
         self.privileged_obs_buf[ids] = torch.cat((proprio,
             in_torso(self.root_states[ids, 7:10]) * self.obs_scales.lin_vel, task), -1)
@@ -347,7 +469,8 @@ class LeggedRobot(CarryBox):
     def diagnostics(self):
         _, bilateral, feet = self._physical_status()
         angle = 2 * torch.acos((self.box_states[:, 3:7] * self.hold_box_quat).sum(-1).abs().clamp(0, 1))
-        return dict(phase=self.phase, reset_category=self.reset_category,
+        support, forces = self._foot_support()
+        result = dict(phase=self.phase, reset_category=self.reset_category,
             approach_completed=self.phase != APPROACH,
             pickup_completed=self.pickup_completed, hold_success=self.hold_success,
             hold_elapsed=self.hold_elapsed, stable_elapsed=self.stable_elapsed,
@@ -358,9 +481,18 @@ class LeggedRobot(CarryBox):
             box_linear_speed=self.box_states[:, 7:10].norm(dim=-1),
             box_angular_speed=self.box_states[:, 10:13].norm(dim=-1),
             bilateral_contact=bilateral, both_feet_contact=feet,
-            foot_slip=self.feet_vel[:, :, :2].norm(dim=-1).amax(-1),
+            left_foot_support=support[:, 0], right_foot_support=support[:, 1],
+            left_foot_force_z=forces[:, 0], right_foot_force_z=forces[:, 1],
+            left_pitch_force_z=self.contact_forces[:, self.pitch_contact_indices[0], 2],
+            right_pitch_force_z=self.contact_forces[:, self.pitch_contact_indices[1], 2],
+            foot_slip=self._support_velocities()[:, :, :2].norm(dim=-1).amax(-1),
+            footstep_events=self.footstep_events, completion_hysteresis_seconds=self.completion_seconds,
             box_height_deviation=(self.box_states[:, 2] - self.env_origins[:, 2] - self.hold_box_height).abs(),
             box_orientation_deviation=angle, command_speed=self.carry_policy_commands[:, :3].norm(dim=-1))
+        result.update({'completion/' + name: value for name, value in self.completion_checks.items()})
+        result.update({'completion_value/' + name: value for name, value in self.completion_values.items()})
+        result['completion/all'] = torch.stack(list(self.completion_checks.values()), -1).all(-1)
+        return result
 
     def episode_diagnostics(self, ids):
         valid = (self.stable_delay[ids] >= 0) & self.pickup_completed[ids]

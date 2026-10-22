@@ -1,0 +1,63 @@
+{
+  "branch": "research/pickup-stand",
+  "base_commit": "465fa311c6bc85a7576acd233c3863778d2dbe44",
+  "upstream_reference": "07bf22bdaf9c23c1d40366334a744c1816b6d42b",
+  "cpu_tests": {
+    "status": "passed",
+    "count": 52,
+    "command": "python -m pytest experiments/pickup_stand/tests -q",
+    "runtime": "Python 3.12 / PyTorch 2.6 CPU",
+    "local_pytest_note": "Loaded installed pytest from D:/Anaconda3/Lib/site-packages after initializing local PyTorch optimizer; used workspace basetemp."
+  },
+  "cpu_training_smoke": {
+    "status": "passed",
+    "iterations": 2,
+    "backend": "synthetic VecEnv, no PhysX",
+    "runner": "HIMOnPolicyRunner",
+    "algorithm": "HIMPPO",
+    "actor_observation_size": 738,
+    "critic_observation_size": 126,
+    "actions": 29,
+    "amp_features": 600,
+    "checkpoint_loads_during_training": 0,
+    "torch_load_forbidden_by_test": true,
+    "actor_critic_discriminator_updated": true,
+    "optimizer_initial_state_entries": 0,
+    "losses_finite": true,
+    "checkpoint_metadata_roundtrip": "passed"
+  },
+  "foot_geometry_and_index_tests": {
+    "status": "passed",
+    "support_links": [
+      "left_ankle_roll_link",
+      "right_ankle_roll_link"
+    ],
+    "index_domain": "DOMAIN_ENV",
+    "vertical_force_threshold_N": 10,
+    "amp_pitch_end_effectors_unchanged": true
+  },
+  "isaac_gym_contact_probe": {
+    "status": "blocked",
+    "attempted": true,
+    "reason": "ModuleNotFoundError: isaacgym on Windows; no Ubuntu SSH access supplied",
+    "command": "python legged_gym/legged_gym/scripts/pickup_stand.py --mode contact-check --steps 500 --num_envs 16 --headless --seed 1 --output outputs/pickup_stand/contact_probe.json"
+  },
+  "isaac_gym_training_smoke": {
+    "status": "blocked",
+    "reason": "Isaac Gym unavailable; CPU runner test does not substitute for physics validation",
+    "command": "python legged_gym/legged_gym/scripts/pickup_stand.py --mode train-smoke --smoke-iterations 2 --num_envs 32 --headless --seed 1 --output outputs/pickup_stand/train_smoke.json"
+  },
+  "compileall": "passed",
+  "git_diff_check": "passed",
+  "protected_files_unchanged": [
+    "legged_gym/legged_gym/envs/g1/carrybox.py",
+    "legged_gym/legged_gym/envs/g1/carrybox_config.py",
+    "legged_gym/legged_gym/envs/g1/carrybox_locomotion.py",
+    "legged_gym/legged_gym/envs/g1/carrybox_locomotion_config.py",
+    "legged_gym/legged_gym/envs/motionlib/motionlib_carrybox.py",
+    "legged_gym/resources/robots/g1/urdf/g1_29dof.urdf",
+    "shared_artifacts/2026-10-19/carry_track/model_33999.pt"
+  ],
+  "long_training_started": false,
+  "trained_success_metrics": "not measured"
+}

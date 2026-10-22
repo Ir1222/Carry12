@@ -273,7 +273,13 @@ class HIMPPO:
                         self.amp_normalizer.update(amp_expert_obs_batch)
 
                 # Gradient step
-                self.optimizer.zero_grad()
+                if amp_stages is None:
+                    self.optimizer.zero_grad()
+                else:
+                    # Older Gym stacks default to zero-valued stale gradients;
+                    # Adam would then update an inactive discriminator via its
+                    # momentum/weight decay after a dynamic minibatch.
+                    self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
